@@ -1515,11 +1515,53 @@ async def _auto_create_roles():
 
 
 async def _auto_create_channels():
-    """Auto-create all channels, categories on startup if they don't exist."""
+    """Auto-create all channels/categories and DELETE any that aren't in the approved list."""
     await asyncio.sleep(5)  # Wait for roles to be created first
     guild = bot.get_guild(GUILD_ID)
     if not guild:
         return
+
+    # ── Exact approved channel names (must match screenshot exactly) ──
+    APPROVED_CHANNELS = {
+        # RULES
+        "📋┃rules",
+        # IMPORTANT
+        "📢┃announcements",
+        "📢┃bot-announcements",
+        "🎁┃giveaways",
+        "✅┃are-we-legit",
+        # EXTRA
+        "🎁┃tips",
+        "✨┃rain",
+        "🎁┃promo-codes",
+        "💜┃boost-rewards",
+        "🚨┃withdrawals",
+        # CHAT
+        "💬┃general",
+        "🖼️┃media",
+        # VERIFICATION
+        "✅┃verify",
+        # VIP
+        "👑┃vip-lounge",
+        "💎・vip-room",
+        # LOGS
+        "📊┃game-log",
+        "💰┃finance-log",
+        "💸┃tip-log",
+        "📨┃invite-log",
+        "✅┃verify-log",
+        "✅┃are-we-legit-log",
+    }
+
+    APPROVED_CATEGORIES = {
+        "RULES",
+        "❗ IMPORTANT",
+        "Extra",
+        "Chat",
+        "🔒 VERIFICATION",
+        "👑 VIP",
+        "📊 LOGS",
+    }
 
     # Get roles (may have just been created)
     def get_role(name):
@@ -1531,6 +1573,40 @@ async def _auto_create_channels():
     vip_role      = get_role(VIP_ROLE_NAME)
     verified_role = get_role(VERIFIED_ROLE_NAME)
     member_role   = get_role(MEMBER_ROLE_NAME)
+
+    # ── DELETE channels not in approved list ──
+    # VIP rooms created by users are kept (they start with 💎・ and aren't the default one)
+    for ch in list(guild.text_channels):
+        if ch.name in APPROVED_CHANNELS:
+            continue
+        # Keep user-created VIP rooms (💎・ prefix but not the default vip-room)
+        if ch.name.startswith("💎・") and ch.name != "💎・vip-room":
+            continue
+        # Keep ticket channels (deposit tickets etc)
+        if "ticket" in ch.name.lower():
+            continue
+        try:
+            await ch.delete(reason="Sabpot auto-cleanup: channel not in approved layout")
+            print(f"[SETUP] Deleted unapproved channel: #{ch.name}")
+        except Exception as e:
+            print(f"[SETUP] Could not delete #{ch.name}: {e}")
+
+    # ── DELETE categories not in approved list ──
+    for cat in list(guild.categories):
+        if cat.name in APPROVED_CATEGORIES:
+            continue
+        # Keep 👑 VIP (already approved) and any user VIP room categories
+        if cat.name == VIP_CATEGORY_NAME:
+            continue
+        # Only delete if empty (safety check)
+        if len(cat.channels) == 0:
+            try:
+                await cat.delete(reason="Sabpot auto-cleanup: empty unapproved category")
+                print(f"[SETUP] Deleted empty unapproved category: {cat.name}")
+            except Exception as e:
+                print(f"[SETUP] Could not delete category {cat.name}: {e}")
+        else:
+            print(f"[SETUP] Skipping non-empty unapproved category: {cat.name}")
 
     async def _get_or_create_cat(name):
         existing = discord.utils.get(guild.categories, name=name)
@@ -7317,6 +7393,13 @@ async def cmd_rps(interaction: discord.Interaction, bet: str):
     if wait > 0:
         await interaction.response.send_message(
             f"⏳ Cooldown — wait **{wait:.1f}s** before playing again.", ephemeral=True)
+
+# ═══════════════════════════════════════════════════════════
+# END OF PART 1 — paste Part 2 directly below this line
+# ═══════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════
+# PART 2 — paste this directly below Part 1
+# ═══════════════════════════════════════════════════════════
         return
     amt = parse_amount(bet)
     if not amt or amt < MIN_BET:
@@ -7333,13 +7416,6 @@ async def cmd_rps(interaction: discord.Interaction, bet: str):
             await ensure_user(conn, interaction.user)
             deducted = await deduct_balance_safe(conn, interaction.user.id, amt)
             if not deducted:
-
-# ═══════════════════════════════════════════════════════════
-# END OF PART 1 — paste Part 2 directly below this line
-# ═══════════════════════════════════════════════════════════
-# ═══════════════════════════════════════════════════════════
-# PART 2 — paste this directly below Part 1
-# ═══════════════════════════════════════════════════════════
                 row = await get_user(conn, interaction.user.id)
                 bal = row["balance"] if row else 0
                 await interaction.response.send_message(
