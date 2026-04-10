@@ -48,18 +48,18 @@ except ImportError:
 
 TOKEN                = os.getenv("TOKEN", "")
 DATABASE_URL         = os.getenv("DATABASE_URL", "")
-# Channel IDs — overwritten by auto-setup at runtime (stored in DB)
-LOG_CHANNEL_ID         = 0   # game-log        (admin only)
-FINANCE_LOG_ID         = 0   # finance-log      (admin only)
-INVITE_LOG_ID          = 0   # invite-log       (admin only)
-TIP_LOG_ID             = 0   # tip-log          (admin only — full detail)
-TIP_PUBLIC_LOG_ID      = 0   # tipping          (public — clean tip feed in Extra category)
-VOUCHES_CHANNEL_ID     = 0   # vouches (public activity feed)
-CASE_BATTLE_LOG_ID     = 0   # case-battles channel
-CASE_BATTLE_CHANNEL_ID = 0   # case-battles channel (same, set by auto-setup)
+# Channel IDs — overwritten by /setup at runtime (stored in DB)
+LOG_CHANNEL_ID       = 0   # game-log
+FINANCE_LOG_ID       = 0   # finance-log
+INVITE_LOG_ID        = 0   # invite-log
+TIP_LOG_ID             = 0   # tip-log (admin only)
+TIP_PUBLIC_LOG_ID      = 0   # tipping  (public in Extra)
+VOUCHES_CHANNEL_ID   = 0   # vouches (public activity feed)
+CASE_BATTLE_LOG_ID   = 0   # case-battles channel
+CASE_BATTLE_CHANNEL_ID = 0  # case-battles channel (same, set by auto-setup)
 
 async def _load_channel_ids():
-    """Load channel IDs saved by auto-setup from the DB into globals."""
+    """Load channel IDs saved by /setup from the DB into globals."""
     global LOG_CHANNEL_ID, FINANCE_LOG_ID, INVITE_LOG_ID, TIP_LOG_ID, TIP_PUBLIC_LOG_ID
     global CASE_BATTLE_LOG_ID, VOUCHES_CHANNEL_ID, CASE_BATTLE_CHANNEL_ID
     try:
@@ -68,12 +68,12 @@ async def _load_channel_ids():
             rows = await conn.fetch("SELECT key, value FROM bot_settings WHERE key LIKE 'channel_%'")
             for r in rows:
                 val = int(r["value"]) if r["value"].isdigit() else 0
-                if   r["key"] == "channel_game_log":        LOG_CHANNEL_ID        = val
-                elif r["key"] == "channel_vouches":          VOUCHES_CHANNEL_ID    = val
-                elif r["key"] == "channel_finance_log":      FINANCE_LOG_ID        = val
-                elif r["key"] == "channel_invite_log":       INVITE_LOG_ID         = val
-                elif r["key"] == "channel_tip_log":          TIP_LOG_ID            = val
-                elif r["key"] == "channel_tip_public":       TIP_PUBLIC_LOG_ID     = val
+                if r["key"] == "channel_game_log":        LOG_CHANNEL_ID     = val
+                if r["key"] == "channel_vouches":          VOUCHES_CHANNEL_ID = val
+                elif r["key"] == "channel_finance_log":   FINANCE_LOG_ID     = val
+                elif r["key"] == "channel_invite_log":    INVITE_LOG_ID      = val
+                elif r["key"] == "channel_tip_log":       TIP_LOG_ID         = val
+                elif r["key"] == "channel_tip_public":    TIP_PUBLIC_LOG_ID  = val
                 elif r["key"] == "channel_case_battles":
                     CASE_BATTLE_LOG_ID     = val
                     CASE_BATTLE_CHANNEL_ID = val
@@ -269,18 +269,12 @@ LOGO_URL = os.getenv("LOGO_URL", "")  # Paste your Sabpot logo URL here or set L
 #   4. Paste that URL below (replace the empty string)
 # OR set environment variables: COINFLIP_HEADS_GIF, COINFLIP_TAILS_GIF, COINFLIP_SPINNING_GIF
 # ⚠️ Discord CDN GIF URLs expire! If GIFs stop showing, re-upload them and update these URLs.
-# ── Coinflip GIF URLs ────────────────────────────────────────────────────────
-# Paste your Discord CDN GIF URLs here directly. They are used as defaults.
-# You can override them via environment variables if needed.
-# HOW TO UPDATE: Upload the GIF to any Discord channel → send → right-click image
-# → Copy Link → paste below. Re-upload if the CDN link expires.
-_CF_HEADS_DEFAULT    = "https://cdn.discordapp.com/attachments/1485237815812948021/1489587591526350939/GIF_20260403_095631_190.gif"
-_CF_TAILS_DEFAULT    = "https://cdn.discordapp.com/attachments/1485237815812948021/1489587538761879654/GIF_20260403_095813_351.gif"
-_CF_SPINNING_DEFAULT = ""  # Optional spinning GIF — paste URL here if you have one
-
-COINFLIP_HEADS_GIF    = os.getenv("COINFLIP_HEADS_GIF",    _CF_HEADS_DEFAULT)
-COINFLIP_TAILS_GIF    = os.getenv("COINFLIP_TAILS_GIF",    _CF_TAILS_DEFAULT)
-COINFLIP_SPINNING_GIF = os.getenv("COINFLIP_SPINNING_GIF", _CF_SPINNING_DEFAULT)
+# Upload your .webp GIFs to imgur.com → right-click → Copy Image Address → paste the i.imgur.com URL.
+# Set as Railway env vars (COINFLIP_HEADS_GIF / COINFLIP_TAILS_GIF) to override without editing code.
+# DO NOT use Discord CDN /attachments/ links — they expire and will not load in embeds.
+COINFLIP_HEADS_GIF    = os.getenv("COINFLIP_HEADS_GIF",    "https://i.imgur.com/PASTE_HEADS_HERE.webp")
+COINFLIP_TAILS_GIF    = os.getenv("COINFLIP_TAILS_GIF",    "https://i.imgur.com/PASTE_TAILS_HERE.webp")
+COINFLIP_SPINNING_GIF = os.getenv("COINFLIP_SPINNING_GIF", "")  # Optional spinning GIF while flipping
 
 
 
@@ -1567,16 +1561,13 @@ async def _auto_create_roles():
 
 
 async def _auto_create_channels():
-    """Auto-create all channels/categories matching exact SABFlippy layout.
-    Channels not in the approved list are deleted. Ticket channels are kept.
-    Logs category is always placed last (bottom of channel list).
-    """
+    """Auto-create all channels/categories and DELETE any that aren't in the approved list."""
     await asyncio.sleep(5)  # Wait for roles to be created first
     guild = bot.get_guild(GUILD_ID)
     if not guild:
         return
 
-    # ── Exact approved channel names — must match layout below exactly ──
+    # ── Exact approved channel names (must match screenshot exactly) ──
     APPROVED_CHANNELS = {
         # RULES
         "📋┃rules",
@@ -1591,26 +1582,21 @@ async def _auto_create_channels():
         "🎁┃promo-codes",
         "💜┃boost-rewards",
         "🚨┃withdrawals",
-        "💸┃tipping",        # public tipping feed — in Extra
         # CHAT
         "💬┃general",
         "🖼️┃media",
         "🤝┃vouch",
         # VERIFICATION
         "✅┃verify",
-        # VIP GAMBLING
+        # VIP
         "👑┃vip-lounge",
         "💎・vip-room",
-        # Gambling rooms (SABPvp removed, just rooms)
-        "🎰┃coinflip",
-        "🎲┃room-1",
-        "🎲┃room-2",
-        # DEPOSITS / WITHDRAWS
+        # DEPOSITS
         "💳┃deposits",
-        # LOGS (admin-only — always last)
+        # LOGS
         "📊┃game-log",
         "💰┃finance-log",
-        "💸┃tip-log",        # admin-only detailed tip log
+        "💸┃tip-log",
         "📨┃invite-log",
         "✅┃verify-log",
         "✅┃are-we-legit-log",
@@ -1618,11 +1604,18 @@ async def _auto_create_channels():
     }
 
     APPROVED_CATEGORIES = {
-        "RULES", "❗ IMPORTANT", "Extra", "Chat",
-        "🔒 VERIFICATION", "VIP GAMBLING", "Gambling",
-        "Deposits", "Withdraws", "📊 LOGS",
+        "RULES",
+        "❗ IMPORTANT",
+        "Extra",
+        "Chat",
+        "🔒 VERIFICATION",
+        "👑 VIP",
+        "Deposits",
+        "Withdraws",
+        "📊 LOGS",
     }
 
+    # Get roles (may have just been created)
     def get_role(name):
         return discord.utils.get(guild.roles, name=name)
 
@@ -1634,30 +1627,36 @@ async def _auto_create_channels():
     member_role   = get_role(MEMBER_ROLE_NAME)
 
     # ── DELETE channels not in approved list ──
+    # VIP rooms created by users are kept (they start with 💎・ and aren't the default one)
     for ch in list(guild.text_channels):
         if ch.name in APPROVED_CHANNELS:
             continue
+        # Keep user-created VIP rooms (💎・ prefix but not the default vip-room)
         if ch.name.startswith("💎・") and ch.name != "💎・vip-room":
             continue
-        if ch.name.lower().startswith("withdraw-"):
+        # Keep wd- withdrawal ticket channels
+        if ch.name.lower().startswith("wd-"):
             continue
+        # Keep deposit ticket channels
         if ch.name.lower().startswith("deposit-"):
             continue
         try:
-            await ch.delete(reason="SABFlippy auto-cleanup: channel not in approved layout")
+            await ch.delete(reason="Sabpot auto-cleanup: channel not in approved layout")
             print(f"[SETUP] Deleted unapproved channel: #{ch.name}")
         except Exception as e:
             print(f"[SETUP] Could not delete #{ch.name}: {e}")
 
-    # ── DELETE empty unapproved categories ──
+    # ── DELETE categories not in approved list ──
     for cat in list(guild.categories):
         if cat.name in APPROVED_CATEGORIES:
             continue
+        # Keep 👑 VIP (already approved) and any user VIP room categories
         if cat.name == VIP_CATEGORY_NAME:
             continue
+        # Only delete if empty (safety check)
         if len(cat.channels) == 0:
             try:
-                await cat.delete(reason="SABFlippy auto-cleanup: empty unapproved category")
+                await cat.delete(reason="Sabpot auto-cleanup: empty unapproved category")
                 print(f"[SETUP] Deleted empty unapproved category: {cat.name}")
             except Exception as e:
                 print(f"[SETUP] Could not delete category {cat.name}: {e}")
@@ -1691,19 +1690,16 @@ async def _auto_create_channels():
             print(f"[SETUP] Could not create #{name}: {e}")
             return None
 
-    # ── Permission overwrites ──────────────────────────────────
-
+    # Permission overwrites
     def _public_ow():
-        """Everyone can read, nobody can send except admins/bot."""
         ow = {
             guild.default_role: discord.PermissionOverwrite(read_messages=True,  send_messages=False),
-            guild.me:           discord.PermissionOverwrite(read_messages=True,  send_messages=True, manage_channels=True),
+            guild.me:           discord.PermissionOverwrite(read_messages=True,  send_messages=True,  manage_channels=True),
         }
         if admin_role: ow[admin_role] = discord.PermissionOverwrite(read_messages=True, send_messages=True)
         return ow
 
     def _members_ow():
-        """Verified/Member can read and send; @everyone hidden."""
         ow = {
             guild.default_role: discord.PermissionOverwrite(read_messages=False),
             guild.me:           discord.PermissionOverwrite(read_messages=True,  send_messages=True, manage_channels=True),
@@ -1713,19 +1709,7 @@ async def _auto_create_channels():
         if admin_role:    ow[admin_role]    = discord.PermissionOverwrite(read_messages=True, send_messages=True)
         return ow
 
-    def _read_only_members_ow():
-        """Members can read but not send — for public log feeds."""
-        ow = {
-            guild.default_role: discord.PermissionOverwrite(read_messages=False),
-            guild.me:           discord.PermissionOverwrite(read_messages=True,  send_messages=True, manage_channels=True),
-        }
-        if verified_role: ow[verified_role] = discord.PermissionOverwrite(read_messages=True, send_messages=False)
-        if member_role:   ow[member_role]   = discord.PermissionOverwrite(read_messages=True, send_messages=False)
-        if admin_role:    ow[admin_role]    = discord.PermissionOverwrite(read_messages=True, send_messages=True)
-        return ow
-
     def _staff_ow():
-        """Staff + Admin + Owner only."""
         ow = {
             guild.default_role: discord.PermissionOverwrite(read_messages=False),
             guild.me:           discord.PermissionOverwrite(read_messages=True,  send_messages=True, manage_channels=True),
@@ -1736,7 +1720,7 @@ async def _auto_create_channels():
         return ow
 
     def _admin_ow():
-        """Admin + Owner only — staff cannot see these."""
+        """Admin + Owner only — Staff cannot see these channels."""
         ow = {
             guild.default_role: discord.PermissionOverwrite(read_messages=False),
             guild.me:           discord.PermissionOverwrite(read_messages=True,  send_messages=True, manage_channels=True),
@@ -1746,7 +1730,6 @@ async def _auto_create_channels():
         return ow
 
     def _vouches_ow():
-        """Public read-only."""
         ow = {
             guild.default_role: discord.PermissionOverwrite(read_messages=True, send_messages=False),
             guild.me:           discord.PermissionOverwrite(read_messages=True, send_messages=True, manage_channels=True),
@@ -1755,7 +1738,6 @@ async def _auto_create_channels():
         return ow
 
     def _vip_ow():
-        """VIP + Admin only."""
         ow = {
             guild.default_role: discord.PermissionOverwrite(read_messages=False),
             guild.me:           discord.PermissionOverwrite(read_messages=True, send_messages=True, manage_channels=True),
@@ -1764,99 +1746,86 @@ async def _auto_create_channels():
         if admin_role: ow[admin_role] = discord.PermissionOverwrite(read_messages=True, send_messages=True)
         return ow
 
-    # ══════════════════════════════════════════════════════════
-    # CREATE CHANNELS — exact layout matching image reference
-    # ══════════════════════════════════════════════════════════
+    # ── Create all categories and channels — SABFlippy layout ──
 
-    # 1. RULES (top)
-    cat_rules = await _get_or_create_cat("RULES")
+    # RULES (top, public read-only)
+    cat_rules  = await _get_or_create_cat("RULES")
     await _get_or_create_ch("📋┃rules", cat_rules, "Server rules", _public_ow())
 
-    # 2. IMPORTANT
-    cat_imp = await _get_or_create_cat("❗ IMPORTANT")
-    await _get_or_create_ch("📢┃announcements",     cat_imp, "Casino announcements",     _public_ow())
-    await _get_or_create_ch("📢┃bot-announcements", cat_imp, "Bot update announcements", _public_ow())
-    await _get_or_create_ch("🎁┃giveaways",         cat_imp, "Giveaways and rain!",      _members_ow())
-    await _get_or_create_ch("✅┃are-we-legit",      cat_imp, "Proof we pay out",         _vouches_ow())
+    # IMPORTANT
+    cat_imp    = await _get_or_create_cat("❗ IMPORTANT")
+    await _get_or_create_ch("📢┃announcements",     cat_imp, "Casino announcements",       _public_ow())
+    await _get_or_create_ch("📢┃bot-announcements", cat_imp, "Bot update announcements",   _public_ow())
+    await _get_or_create_ch("🎁┃giveaways",         cat_imp, "Giveaways and rain!",        _members_ow())
+    await _get_or_create_ch("✅┃are-we-legit",      cat_imp, "Proof we pay out",           _vouches_ow())
 
-    # 3. Extra
-    cat_extra = await _get_or_create_cat("Extra")
-    await _get_or_create_ch("🎁┃tips",          cat_extra, "Send tips to others",             _members_ow())
-    await _get_or_create_ch("✨┃rain",           cat_extra, "Gem rain events",                _members_ow())
-    await _get_or_create_ch("🎁┃promo-codes",   cat_extra, "Redeem promo codes here",         _members_ow())
-    await _get_or_create_ch("💜┃boost-rewards", cat_extra, "Rewards for boosting the server", _members_ow())
-    await _get_or_create_ch("🚨┃withdrawals",   cat_extra, "Use /withdraw to request items",  _members_ow())
-    # Public tipping feed — members can see tips, can't send (bot posts here)
-    tipping_pub_ch = await _get_or_create_ch("💸┃tipping", cat_extra,
-                                              "Live tip feed — watch the generosity!",
-                                              _read_only_members_ow())
+    # EXTRA
+    cat_extra  = await _get_or_create_cat("Extra")
+    await _get_or_create_ch("🎁┃tips",           cat_extra, "Send tips to others",              _members_ow())
+    await _get_or_create_ch("✨┃rain",            cat_extra, "Gem rain events",                 _members_ow())
+    await _get_or_create_ch("🎁┃promo-codes",    cat_extra, "Redeem promo codes here",          _members_ow())
+    await _get_or_create_ch("💜┃boost-rewards",  cat_extra, "Rewards for boosting the server",  _members_ow())
+    await _get_or_create_ch("🚨┃withdrawals",    cat_extra, "Use /withdraw to request an item", _members_ow())
 
-    # 4. Chat
-    cat_chat = await _get_or_create_cat("Chat")
-    games_ch = await _get_or_create_ch("💬┃general", cat_chat, "General chat",          _members_ow())
-    await _get_or_create_ch("🖼️┃media",                cat_chat, "Share media here",    _members_ow())
-    await _get_or_create_ch("🤝┃vouch",                cat_chat, "Vouch for our service", _members_ow())
+    # CHAT
+    cat_chat   = await _get_or_create_cat("Chat")
+    games_ch   = await _get_or_create_ch("💬┃general",  cat_chat, "General chat",          _members_ow())
+    await _get_or_create_ch("🖼️┃media",                  cat_chat, "Share media here",     _members_ow())
+    await _get_or_create_ch("🤝┃vouch",                  cat_chat, "Vouch for our service", _members_ow())
 
-    # 5. VERIFICATION
+    # VERIFICATION
     cat_verify = await _get_or_create_cat("🔒 VERIFICATION")
     await _get_or_create_ch("✅┃verify", cat_verify, "Verify to access the server", {
-        guild.default_role: discord.PermissionOverwrite(read_messages=True,  send_messages=False),
-        guild.me:           discord.PermissionOverwrite(read_messages=True,  send_messages=True, manage_channels=True),
+        guild.default_role: discord.PermissionOverwrite(read_messages=True, send_messages=False),
+        guild.me:           discord.PermissionOverwrite(read_messages=True, send_messages=True, manage_channels=True),
     })
 
-    # 6. VIP GAMBLING (was SABPvp — removed that name, just the category)
-    cat_vip_gamble = await _get_or_create_cat("VIP GAMBLING")
-    await _get_or_create_ch("👑┃vip-lounge", cat_vip_gamble, "Exclusive VIP lounge",                          _vip_ow())
-    await _get_or_create_ch("💎・vip-room",  cat_vip_gamble, "Private VIP room — /createviproom to get your own", _vip_ow())
+    # VIP — lounge + room placeholder (user rooms auto-created via /createviproom)
+    cat_vip = await _get_or_create_cat("👑 VIP")
+    await _get_or_create_ch("👑┃vip-lounge",  cat_vip, "Exclusive VIP lounge", _vip_ow())
+    await _get_or_create_ch("💎・vip-room",   cat_vip, "Private VIP room — use /createviproom to get your own", _vip_ow())
 
-    # 7. Gambling (game rooms — no SABPvp prefix)
-    cat_gambling = await _get_or_create_cat("Gambling")
-    await _get_or_create_ch("🎰┃coinflip", cat_gambling, "Play /coinflip here", _members_ow())
-    room1_ch = await _get_or_create_ch("🎲┃room-1",   cat_gambling, "General gambling room 1", _members_ow())
-    room2_ch = await _get_or_create_ch("🎲┃room-2",   cat_gambling, "General gambling room 2", _members_ow())
-
-    # 8. Deposits
-    cat_deposits = await _get_or_create_cat("Deposits")
-    await _get_or_create_ch("💳┃deposits", cat_deposits, "Use /deposit to open a ticket", _members_ow())
-
-    # 9. Withdraws (withdraw-username ticket channels live here)
-    cat_withdraws = await _get_or_create_cat("Withdraws")
-
-    # 10. LOGS — always at bottom, all admin-only except tipping (handled above)
+    # LOGS (staff only)
     cat_logs       = await _get_or_create_cat("📊 LOGS")
-    game_log_ch    = await _get_or_create_ch("📊┃game-log",         cat_logs, "All game results",       _admin_ow())
-    finance_log_ch = await _get_or_create_ch("💰┃finance-log",      cat_logs, "Deposits & withdrawals", _admin_ow())
-    tip_log_ch     = await _get_or_create_ch("💸┃tip-log",          cat_logs, "Full tip detail log",    _admin_ow())
-    invite_log_ch  = await _get_or_create_ch("📨┃invite-log",       cat_logs, "Invite reward logs",     _admin_ow())
-    verify_log_ch  = await _get_or_create_ch("✅┃verify-log",       cat_logs, "Verification logs",      _admin_ow())
-    vouches_ch     = await _get_or_create_ch("✅┃are-we-legit-log", cat_logs, "Public vouch feed",      _admin_ow())
-    withdraw_log_ch= await _get_or_create_ch("🚨┃withdraws",        cat_logs, "All withdrawal tickets", _staff_ow())
+    game_log_ch    = await _get_or_create_ch("📊┃game-log",         cat_logs, "All game results",          _admin_ow())
+    finance_log_ch = await _get_or_create_ch("💰┃finance-log",      cat_logs, "Deposits & withdrawals",    _admin_ow())
+    tip_log_ch     = await _get_or_create_ch("💸┃tip-log",          cat_logs, "Tip transactions",          _admin_ow())
+    invite_log_ch  = await _get_or_create_ch("📨┃invite-log",       cat_logs, "Invite reward logs",        _admin_ow())
+    verify_log_ch  = await _get_or_create_ch("✅┃verify-log",       cat_logs, "Verification logs",         _admin_ow())
+    vouches_ch     = await _get_or_create_ch("✅┃are-we-legit-log",  cat_logs, "Public vouch feed",         _admin_ow())
+    withdraw_log_ch= await _get_or_create_ch("🚨┃withdraws",        cat_logs, "All withdrawal tickets",    _staff_ow())
 
-    # ── Save channel IDs to DB and globals ────────────────────
-    global LOG_CHANNEL_ID, FINANCE_LOG_ID, INVITE_LOG_ID, TIP_LOG_ID, TIP_PUBLIC_LOG_ID
+    # DEPOSITS (staff-visible — deposit- ticket channels auto-created here)
+    cat_deposits   = await _get_or_create_cat("Deposits")
+    await _get_or_create_ch("💳┃deposits",       cat_deposits, "Use /deposit to open a ticket", _members_ow())
+
+    # WITHDRAWS (staff-visible — withdraw- ticket channels auto-created here)
+    cat_withdraws  = await _get_or_create_cat("Withdraws")
+
+    # Dummy vars for compat (no separate case-battles category in this layout)
+    cb_ch = games_ch
+
+    # ── Save channel IDs to DB and globals ──
+    global LOG_CHANNEL_ID, FINANCE_LOG_ID, INVITE_LOG_ID, TIP_LOG_ID
     global CASE_BATTLE_CHANNEL_ID, CASE_BATTLE_LOG_ID, VOUCHES_CHANNEL_ID
 
-    cb_ch = games_ch  # case battles fall back to general if no dedicated channel
-
-    if game_log_ch:     LOG_CHANNEL_ID         = game_log_ch.id
-    if finance_log_ch:  FINANCE_LOG_ID         = finance_log_ch.id
-    if invite_log_ch:   INVITE_LOG_ID          = invite_log_ch.id
-    if tip_log_ch:      TIP_LOG_ID             = tip_log_ch.id
-    if tipping_pub_ch:  TIP_PUBLIC_LOG_ID      = tipping_pub_ch.id
-    if cb_ch:           CASE_BATTLE_CHANNEL_ID = cb_ch.id; CASE_BATTLE_LOG_ID = cb_ch.id
-    if vouches_ch:      VOUCHES_CHANNEL_ID     = vouches_ch.id
+    if game_log_ch:    LOG_CHANNEL_ID         = game_log_ch.id
+    if finance_log_ch: FINANCE_LOG_ID         = finance_log_ch.id
+    if invite_log_ch:  INVITE_LOG_ID          = invite_log_ch.id
+    if tip_log_ch:     TIP_LOG_ID             = tip_log_ch.id
+    if cb_ch:          CASE_BATTLE_CHANNEL_ID = cb_ch.id; CASE_BATTLE_LOG_ID = cb_ch.id
+    if vouches_ch:     VOUCHES_CHANNEL_ID     = vouches_ch.id
 
     settings = {}
-    if game_log_ch:     settings["channel_game_log"]     = str(game_log_ch.id)
-    if finance_log_ch:  settings["channel_finance_log"]  = str(finance_log_ch.id)
-    if tip_log_ch:      settings["channel_tip_log"]      = str(tip_log_ch.id)
-    if tipping_pub_ch:  settings["channel_tip_public"]   = str(tipping_pub_ch.id)
-    if invite_log_ch:   settings["channel_invite_log"]   = str(invite_log_ch.id)
-    if verify_log_ch:   settings["channel_verify_log"]   = str(verify_log_ch.id)
-    if cb_ch:           settings["channel_case_battles"] = str(cb_ch.id)
-    if vouches_ch:      settings["channel_vouches"]      = str(vouches_ch.id)
-    if games_ch:        settings["channel_games"]        = str(games_ch.id)
-    if withdraw_log_ch: settings["channel_withdraw_log"] = str(withdraw_log_ch.id)
+    if game_log_ch:       settings["channel_game_log"]     = str(game_log_ch.id)
+    if finance_log_ch:    settings["channel_finance_log"]  = str(finance_log_ch.id)
+    if tip_log_ch:        settings["channel_tip_log"]      = str(tip_log_ch.id)
+    if invite_log_ch:     settings["channel_invite_log"]   = str(invite_log_ch.id)
+    if verify_log_ch:     settings["channel_verify_log"]   = str(verify_log_ch.id)
+    if cb_ch:             settings["channel_case_battles"] = str(cb_ch.id)
+    if vouches_ch:        settings["channel_vouches"]      = str(vouches_ch.id)
+    if games_ch:          settings["channel_games"]        = str(games_ch.id)
+    if withdraw_log_ch:   settings["channel_withdraw_log"] = str(withdraw_log_ch.id)
 
     if settings:
         conn = await get_conn()
@@ -2009,6 +1978,7 @@ async def on_member_join(member: discord.Member):
     if not member.bot:
         conn = await get_conn()
         try:
+            await _ensure_member_snapshot_table(conn)
             await _snapshot_member(conn, member)
         except Exception:
             pass
@@ -2076,7 +2046,9 @@ async def on_member_join(member: discord.Member):
     finally:
         await release_conn(conn)
 
-    verify_channel = guild.get_channel(int(ch_row["value"])) if ch_row else None
+    verify_channel = None
+    if ch_row and ch_row["value"] and str(ch_row["value"]).isdigit():
+        verify_channel = guild.get_channel(int(ch_row["value"]))
     ch_mention = verify_channel.mention if verify_channel else "#verify"
 
     try:
@@ -2098,7 +2070,7 @@ async def send_invite_log(embed: discord.Embed):
     """Send to the invite rewards log channel (configured via /setinvitelog)."""
     conn = await get_conn()
     try:
-        row = await conn.fetchrow("SELECT value FROM bot_settings WHERE key='invite_log_channel'")
+        row = await conn.fetchrow("SELECT value FROM bot_settings WHERE key='channel_invite_log'")
     finally:
         await release_conn(conn)
     if not row:
@@ -2156,54 +2128,30 @@ async def send_finance_log(embed: discord.Embed):
         print(f"[FINANCE LOG] Failed to send: {e}")
 
 async def send_tip_log(embed: discord.Embed):
-    """Send tip to BOTH:
-    - 💸┃tip-log  (admin-only, full detail embed)
-    - 💸┃tipping  (public channel in Extra — clean public-facing log)
-    """
-    # ── Admin-only detailed log ──
+    """Send to BOTH admin tip-log AND the public tipping channel in Extra."""
     if TIP_LOG_ID:
         ch = bot.get_channel(TIP_LOG_ID)
         if ch is None:
-            try:
-                ch = await bot.fetch_channel(TIP_LOG_ID)
-            except Exception as e:
-                print(f"[TIP LOG] Could not fetch admin tip-log {TIP_LOG_ID}: {e}")
-                ch = None
+            try: ch = await bot.fetch_channel(TIP_LOG_ID)
+            except Exception: ch = None
         if ch:
-            try:
-                await ch.send(embed=embed)
-            except Exception as e:
-                print(f"[TIP LOG] Failed to send to admin tip-log: {e}")
-
-    # ── Public tipping channel (clean version) ──
+            try: await ch.send(embed=embed)
+            except Exception as e: print(f"[TIP LOG] admin send failed: {e}")
     if TIP_PUBLIC_LOG_ID:
-        pub_ch = bot.get_channel(TIP_PUBLIC_LOG_ID)
-        if pub_ch is None:
+        pub = bot.get_channel(TIP_PUBLIC_LOG_ID)
+        if pub is None:
+            try: pub = await bot.fetch_channel(TIP_PUBLIC_LOG_ID)
+            except Exception: pub = None
+        if pub:
             try:
-                pub_ch = await bot.fetch_channel(TIP_PUBLIC_LOG_ID)
-            except Exception as e:
-                print(f"[TIP LOG] Could not fetch public tipping channel {TIP_PUBLIC_LOG_ID}: {e}")
-                pub_ch = None
-        if pub_ch:
-            try:
-                # Build a clean public-facing version of the tip embed
-                # Pull sender/receiver/amount from the admin embed fields
-                sender  = next((f.value for f in embed.fields if "From" in f.name), "Unknown")
-                recip   = next((f.value for f in embed.fields if "To" in f.name),   "Unknown")
-                amount  = next((f.value for f in embed.fields if "Amount" in f.name), "?")
-                pub_e = discord.Embed(
-                    color=0xA855F7,
-                    description=(
-                        f"💸 **Tip Sent!**\n"
-                        f"**From:** {sender}\n"
-                        f"**To:** {recip}\n"
-                        f"**Amount:** {amount} 💎"
-                    )
-                )
+                sender = next((f.value for f in embed.fields if "From" in f.name), "Someone")
+                recip  = next((f.value for f in embed.fields if "To"   in f.name), "Someone")
+                amount = next((f.value for f in embed.fields if "Amount" in f.name), "?")
+                pub_e  = discord.Embed(color=0xA855F7,
+                    description=f"💸 **Tip Sent!**\n**From:** {sender}\n**To:** {recip}\n**Amount:** {amount} 💎")
                 pub_e.set_footer(text=now_ts())
-                await pub_ch.send(embed=pub_e)
-            except Exception as e:
-                print(f"[TIP LOG] Failed to send to public tipping channel: {e}")
+                await pub.send(embed=pub_e)
+            except Exception as e: print(f"[TIP LOG] public send failed: {e}")
 
 async def send_vouches_log(embed: discord.Embed):
     """Send to the public vouches channel (deposits, withdrawals, big wins)."""
@@ -2339,6 +2287,8 @@ async def cmd_balance(interaction: discord.Interaction):
         wagered  = row["wagered"]
         wins     = row["wins"]
         losses   = row["losses"]
+        streak   = row["streak"]
+        max_streak = row["max_streak"]
     except Exception as e:
         print(f"[ERROR] balance: {type(e).__name__}: {e}")
         await interaction.response.send_message("⚠️  Something went wrong — try again.", ephemeral=True)
@@ -2347,10 +2297,8 @@ async def cmd_balance(interaction: discord.Interaction):
         await release_conn(conn)
 
     net_profit = balance - wagered
-    is_up      = net_profit >= 0
-    pnl_sign   = "+" if is_up else "-"
+    pnl_sign   = "+" if net_profit >= 0 else "-"
 
-    # Clean SABFlippy balance embed — matches image reference exactly
     embed = discord.Embed(
         title=f"💎 {interaction.user.display_name}'s Balance",
         color=C_GOLD,
@@ -3755,31 +3703,30 @@ class CoinflipView(BaseGameView):
         payout = min(self.bet * 2, MAX_PAYOUT) if creator_won else 0
         winner_mention = self.creator.mention if creator_won else opponent_label
 
-        # ── Phase 1: spinning animation with coin GIF ──
-        # Pick the correct GIF based on the actual result
-        coin_gif = COINFLIP_HEADS_GIF if result == "Heads" else COINFLIP_TAILS_GIF
-        # Strip any expired query-string tokens — use the base URL only
-        if coin_gif and "?" in coin_gif:
-            coin_gif = coin_gif.split("?")[0]
-
-        spinning_embed = discord.Embed(
+        # ── Phase 1: spinning animation ──────────────────────────────────────
+        gif_url   = COINFLIP_HEADS_GIF if result == "Heads" else COINFLIP_TAILS_GIF
+        gif_valid = bool(
+            gif_url and gif_url.startswith("http") and "PASTE_" not in gif_url
+            and any(gif_url.lower().endswith(ext) for ext in (".gif", ".webp", ".png", ".jpg"))
+        )
+        spin_embed = discord.Embed(
             color=C_GOLD,
             description=(
-                f"## 🪙  COINFLIP\n"
+                f"## 🪙  COINFLIP — FLIPPING...\n"
                 f"┌─────────────────────────┐\n"
                 f"│ 💰 **Bet** • {format_amount(self.bet)} 💎\n"
-                f"│ 🎯 **Side** • {self.choice}\n"
-                f"│ ⏳ **Flipping...**\n"
+                f"│ 🎯 **Your Side** • {self.choice}\n"
+                f"│ ⏳ **Flipping the coin...**\n"
                 f"└─────────────────────────┘"
             )
         )
-        if coin_gif:
-            spinning_embed.set_image(url=coin_gif)
-        _brand_embed(spinning_embed)
+        if gif_valid:
+            spin_embed.set_image(url=gif_url)
+        _brand_embed(spin_embed)
         try:
-            await msg.edit(embed=spinning_embed, view=None)
+            await msg.edit(embed=spin_embed, view=None)
         except Exception as e:
-            print(f"[COINFLIP ANIM] spin embed error: {e}")
+            print(f"[COINFLIP ANIM] embed edit failed: {e}")
         await asyncio.sleep(2.5)
 
         # ── Phase 2: DB work ──
@@ -3815,12 +3762,11 @@ class CoinflipView(BaseGameView):
         except Exception as _db_err:
             print(f"[COINFLIP DB ERROR] {_db_err}")
 
-        # ── Phase 3: BIG result reveal ──
+        # ── Phase 3: result reveal ───────────────────────────────────────────
         coin_icon = "🟡" if result == "Heads" else "⬛"
-        net = payout - self.bet
-
         if creator_won:
             result_color = C_WIN
+            net          = payout - self.bet  # after-tax profit
             outcome_line = f"│ ✅ **You Win** • +{format_amount(net)} 💎"
         else:
             result_color = C_LOSS
@@ -3840,8 +3786,8 @@ class CoinflipView(BaseGameView):
             )
         )
         result_embed.set_thumbnail(url=await get_avatar(self.creator))
-        if coin_gif:
-            result_embed.set_image(url=coin_gif)
+        if gif_valid:
+            result_embed.set_image(url=gif_url)
         _brand_embed(result_embed)
 
         try:
@@ -3881,24 +3827,16 @@ class ProgressiveCoinflipView(BaseGameView):
     def game_embed(self, result_line: str = "", last_guess: str = "", last_result: str = "") -> discord.Embed:
         multiplier = self.current_pot / self.initial_bet
         color = C_GOLD if not result_line else (C_WIN if "✅" in result_line else C_LOSS)
-        next_pot = format_amount(self.current_pot * 2)
-        status = f"│ {result_line}" if result_line else f"│ 🎯 **Pick Heads or Tails!**"
-        last_info = f"\n│ 🪙 **Last** • {last_guess} → {last_result}" if last_guess and last_result else ""
-        embed = discord.Embed(
-            color=color,
-            description=(
-                f"## 🪙  PROGRESSIVE FLIP\n"
-                f"┌─────────────────────────┐\n"
-                f"│ 💰 **Bet** • {format_amount(self.initial_bet)} 💎\n"
-                f"│ 💎 **Pot** • {format_amount(self.current_pot)} 💎\n"
-                f"│ 📈 **Multiplier** • {multiplier:.1f}x\n"
-                f"│ 🔢 **Rounds Won** • {self.rounds}\n"
-                f"│ ⏭️ **Next Win** • {next_pot} 💎\n"
-                f"{last_info}\n"
-                f"{status}\n"
-                f"└─────────────────────────┘"
-            )
-        )
+        embed = discord.Embed(title="🪙  PROGRESSIVE FLIP", color=color)
+        embed.add_field(name="💰 Initial Bet",   value=format_amount(self.initial_bet), inline=True)
+        embed.add_field(name="💎 Current Pot",   value=format_amount(self.current_pot), inline=True)
+        embed.add_field(name="📈 Multiplier",    value=f"{multiplier:.1f}x",            inline=True)
+        embed.add_field(name="🔢 Rounds Won",    value=str(self.rounds),                inline=True)
+        embed.add_field(name="⏭️ Next Win",      value=format_amount(self.current_pot * 2), inline=True)
+        if last_guess and last_result:
+            embed.add_field(name="Last Round", value=f"Guess: {last_guess} → Result: {last_result}", inline=False)
+        if result_line:
+            embed.add_field(name="Outcome", value=result_line, inline=False)
         embed.set_footer(text="Pick Heads or Tails — Cash out anytime to lock your winnings!")
         return embed
 
@@ -3920,6 +3858,7 @@ class ProgressiveCoinflipView(BaseGameView):
         won = (result == guess)
 
         coin_gif     = COINFLIP_HEADS_GIF if result == "Heads" else COINFLIP_TAILS_GIF
+        coin_gif     = coin_gif if (coin_gif and coin_gif.startswith("http") and "PASTE_" not in coin_gif) else ""
         coin_icon    = "🟡" if result == "Heads" else "⬛"
 
         # ── Spinning animation with coin GIF ──
@@ -4195,23 +4134,20 @@ class ProgressiveDiceView(BaseGameView):
     def game_embed(self, result_line: str = "", player_roll: int = 0, dealer_roll: int = 0) -> discord.Embed:
         multiplier = self.current_pot / self.initial_bet
         color = C_GOLD if not result_line else (C_WIN if "✅" in result_line else (C_PUSH if "🔄" in result_line else C_LOSS))
-        roll_info = f"\n│ 🎲 **Roll** • You {DICE_EMOJIS[player_roll-1]} {player_roll} vs Dealer {DICE_EMOJIS[dealer_roll-1]} {dealer_roll}" if player_roll and dealer_roll else ""
-        status = f"\n│ {result_line}" if result_line else ""
-        embed = discord.Embed(
-            color=color,
-            description=(
-                f"## 🎲  PROGRESSIVE DICE\n"
-                f"┌─────────────────────────┐\n"
-                f"│ 💰 **Bet** • {format_amount(self.initial_bet)} 💎\n"
-                f"│ 💎 **Pot** • {format_amount(self.current_pot)} 💎\n"
-                f"│ 📈 **Multiplier** • {multiplier:.2f}x\n"
-                f"│ 🔢 **Rounds Won** • {self.rounds}\n"
-                f"│ ⏭️ **Next Win** • {format_amount(int(self.current_pot * 1.96))} 💎\n"
-                f"{roll_info}"
-                f"{status}\n"
-                f"└─────────────────────────┘"
+        embed = discord.Embed(title="🎲  PROGRESSIVE DICE", color=color)
+        embed.add_field(name="💰 Initial Bet",  value=format_amount(self.initial_bet),    inline=True)
+        embed.add_field(name="💎 Current Pot",  value=format_amount(self.current_pot),    inline=True)
+        embed.add_field(name="📈 Multiplier",   value=f"{multiplier:.2f}x",               inline=True)
+        embed.add_field(name="🔢 Rounds Won",   value=str(self.rounds),                   inline=True)
+        embed.add_field(name="⏭️ Next Win",     value=format_amount(int(self.current_pot * 1.96)), inline=True)
+        if player_roll and dealer_roll:
+            embed.add_field(
+                name="Last Roll",
+                value=f"You: {DICE_EMOJIS[player_roll-1]} **{player_roll}** vs Dealer: {DICE_EMOJIS[dealer_roll-1]} **{dealer_roll}**",
+                inline=False
             )
-        )
+        if result_line:
+            embed.add_field(name="Outcome", value=result_line, inline=False)
         embed.set_footer(text="Roll to double — Cash out anytime to secure your winnings!")
         return embed
 
@@ -4676,10 +4612,10 @@ class DiceView(BaseGameView):
 
         opponent_label = "🤖 Bot" if self.vs_bot else self.opponent.mention
         embed = discord.Embed(title="🎲  DICE ROLL", color=C_GOLD)
-        embed.add_field(name=f"🎲 {self.creator.display_name}",
-                        value=f"{DICE_EMOJIS[creator_roll-1]} **{creator_roll}**", inline=True)
-        embed.add_field(name="🎲 Opponent",
-                        value=f"{DICE_EMOJIS[opponent_roll-1]} **{opponent_roll}**", inline=True)
+        embed.add_field(name=self.creator.display_name,
+                        value=f"{DICE_EMOJIS[creator_roll-1]} rolled **{creator_roll}**", inline=True)
+        embed.add_field(name="Opponent",
+                        value=f"{DICE_EMOJIS[opponent_roll-1]} rolled **{opponent_roll}**", inline=True)
 
         try:
             conn = await get_conn()
@@ -4908,24 +4844,15 @@ class RouletteView(BaseGameView):
             print(f"[ROULETTE DB ERROR] {_db_err}")
 
         roul_net  = payout - self.bet
-        net_str   = f"+{format_amount(roul_net)}" if roul_net >= 0 else f"-{format_amount(abs(roul_net))}"
-        if won:
-            outcome_line = f"│ ✅ **Profit** • {net_str} 💎"
-        else:
-            outcome_line = f"│ ❌ **Lost** • -{format_amount(self.bet)} 💎"
-
         embed = discord.Embed(
             color=color,
             description=(
-                f"## {result_emoji}  ROULETTE — {result_name.upper()}\n"
-                f"┌─────────────────────────┐\n"
-                f"│ 💰 **Bet** • {format_amount(self.bet)} 💎\n"
-                f"│ 🎯 **Your Pick** • {chosen_emoji} {chosen_name}\n"
-                f"│ 🎡 **Result** • {result_emoji} {result_name} ({result_multi}×)\n"
-                f"{outcome_line}\n"
-                f"└─────────────────────────┘"
+                f"## {result_emoji}  {result_name.upper()}\n"
+                f"{result_desc(won, False, self.bet, payout)}"
             )
         )
+        embed.add_field(name="Pick",    value=f"{chosen_emoji} {chosen_name}", inline=True)
+        embed.add_field(name="Pays",    value=f"`{result_multi}×`",            inline=True)
         embed.set_thumbnail(url=await get_avatar(self.creator))
         _brand_embed(embed)
 
@@ -5217,39 +5144,29 @@ class BaccaratView(BaseGameView):
             title = "▼  LOSS"
             color = C_LOSS
 
-        # Build result embed matching SABFlippy screenshot style
-        bac_net   = payout - self.bet
-        net_str   = f"+{format_amount(bac_net)}" if bac_net > 0 else (f"±0" if bac_net == 0 else f"-{format_amount(abs(bac_net))}")
+        # Build result embed matching screenshot style
         if is_push:
-            result_line = f"│ 🤝 **Push** • Bet Returned"
+            outcome_line = "🤝 It's a Tie!\n🤝 It's a tie!"
+            outcome_icon = "Push 🤝"
+            returned_val = format_amount(self.bet)
         elif won:
-            result_line = f"│ ✅ **Result** • +{format_amount(bac_net)} 💎"
+            outcome_line = f"**✦  YOU WIN  +{format_amount(payout - self.bet)}**"
+            outcome_icon = "You Win! 🎉"
+            returned_val = format_amount(payout)
         else:
-            result_line = f"│ ❌ **Result** • -{format_amount(self.bet)} 💎"
+            outcome_line = f"**✗  {winner.upper()} WINS**"
+            outcome_icon = "You Lose 💀"
+            returned_val = "0"
 
-        # Card display matching screenshot: "Player: 2♠ A♥ = 3"
-        pt_final = bac_total(ph)
-        bt_final = bac_total(bh)
-        p_cards  = "  ".join(f"{RANKS[c[0]]}{c[1]}" for c in ph)
-        b_cards  = "  ".join(f"{RANKS[c[0]]}{c[1]}" for c in bh)
-
+        bac_net_str = f"+{format_amount(payout - self.bet)}" if payout > self.bet else ("±0" if payout == self.bet else f"-{format_amount(self.bet)}")
         result_embed = discord.Embed(
             color=color,
-            description=(
-                f"## 🎴  BACCARAT GAME\n"
-                f"┌─────────────────────────┐\n"
-                f"│ 💰 **Bet** • {format_amount(self.bet)} 💎\n"
-                f"│ 🎯 **Bet On** • {bet_type}\n"
-                f"{result_line}\n"
-                f"└─────────────────────────┘\n"
-                f"\n"
-                f"**Player:** {p_cards} = **{pt_final}**\n"
-                f"**Banker:** {b_cards} = **{bt_final}**\n"
-                f"\n"
-                f"{'🏦 Banker Wins!' if winner=='Banker' else ('🧑 Player Wins!' if winner=='Player' else '🤝 Tie!')}"
-                f" {'Banker wins this round!' if winner=='Banker' else ('Player wins this round!' if winner=='Player' else 'Its a tie!')}"
-            )
+            description=f"## 🃏  BACCARAT  {outcome_icon}"
         )
+        result_embed.description += f"\n{result_desc(won, is_push, self.bet, payout)}"
+        result_embed.add_field(name="Player", value=f"`{bac_str(ph)}`",      inline=True)
+        result_embed.add_field(name="Banker", value=f"`{bac_str(bh)}`",      inline=True)
+        result_embed.add_field(name="Bet on", value=f"**{bet_type}**",        inline=True)
         result_embed.set_thumbnail(url=await get_avatar(self.creator))
         _brand_embed(result_embed)
 
@@ -5430,21 +5347,28 @@ class BlackjackView(BaseGameView):
         player_bj   = is_blackjack(self.player_hand) and self.extra_bet == 0
         potential   = int(total_bet * 2.5) if player_bj else total_bet * 2
 
+        # Build card strings like screenshot: "6♣ 3♠"
         player_cards = bj_str(self.player_hand)
         dealer_cards = bj_str(self.dealer_hand, hide_dealer)
 
         embed = discord.Embed(
             color=C_GOLD,
+            title="🃏  Blackjack",
             description=(
-                f"## ♠️  BLACKJACK\n"
-                f"┌─────────────────────────┐\n"
-                f"│ 💰 **Bet** • {format_amount(total_bet)} 💎\n"
-                f"│ 💵 **Potential** • {format_amount(potential)} 💎\n"
-                f"└─────────────────────────┘\n"
-                f"\n"
-                f"**Your Hand:** {player_cards} = **{pt}**\n"
-                f"**Dealer's Hand:** {dealer_cards} = **{dlabel}**"
+                f"**Bet:** {format_amount(total_bet)} 💎\n"
+                f"**Potential Winnings:** {format_amount(potential)} 💎"
             )
+        )
+        embed.add_field(
+            name="Your Hand:",
+            value=f"{player_cards}\nPlayer's Card Value: **{pt}**",
+            inline=False
+        )
+        dealer_val_display = f"**{dt}** + ?" if hide_dealer else f"**{bj_total(self.dealer_hand)}**"
+        embed.add_field(
+            name="Dealer's Hand:",
+            value=f"{dealer_cards}\nDealer's Card Value: **{dlabel}**",
+            inline=False
         )
         _brand_embed(embed)
         return embed
@@ -5517,32 +5441,30 @@ class BlackjackView(BaseGameView):
         won     = payout > total_bet
 
         net = payout - total_bet
-        if won:
-            outcome_line = f"│ ✅ **Result** • +{format_amount(net)} 💎"
-            res_color = C_WIN
-            res_header = "## ♠️  BLACKJACK — YOU WIN!"
-        elif is_push:
-            outcome_line = f"│ 🤝 **Push** • Bet Returned"
-            res_color = C_PUSH
-            res_header = "## ♠️  BLACKJACK — PUSH"
-        else:
-            outcome_line = f"│ ❌ **Result** • -{format_amount(total_bet)} 💎"
-            res_color = C_LOSS
-            res_header = "## ♠️  BLACKJACK — YOU LOSE"
-
+        net_str = f"+{format_amount(net)}" if net > 0 else (f"-{format_amount(abs(net))}" if net < 0 else "±0")
+        win_icon  = "🏆" if won else ("🔁" if is_push else "💀")
+        win_title = "YOU WIN" if won else ("PUSH" if is_push else "YOU LOSE")
         embed = discord.Embed(
-            color=res_color,
+            color=color,
+            title=f"🃏  Blackjack — {result}",
             description=(
-                f"{res_header}\n"
-                f"┌─────────────────────────┐\n"
-                f"│ 💰 **Bet** • {format_amount(total_bet)} 💎\n"
-                f"{outcome_line}\n"
-                f"└─────────────────────────┘\n"
-                f"\n"
-                f"**Your Hand:** {bj_str(self.player_hand)} = **{pt}**\n"
-                f"**Dealer's Hand:** {bj_str(self.dealer_hand)} = **{dt}**"
+                f"# {win_icon}  {win_title}  {win_icon}\n\n"
+                f"**Bet:** {format_amount(total_bet)} 💎"
             )
         )
+        embed.add_field(
+            name="Your Hand:",
+            value=f"{bj_str(self.player_hand)}\nPlayer's Card Value: **{pt}**",
+            inline=False
+        )
+        embed.add_field(
+            name="Dealer's Hand:",
+            value=f"{bj_str(self.dealer_hand)}\nDealer's Card Value: **{dt}**",
+            inline=False
+        )
+        net_str2 = f"+{format_amount(payout - total_bet)}" if won else (f"-{format_amount(total_bet)}" if not is_push else "±0")
+        embed.add_field(name="Result", value=f"`{net_str2}` 💎", inline=True)
+        embed.add_field(name="Payout", value=f"`{format_amount(payout)}` 💎", inline=True)
         _brand_embed(embed)
 
         try:
@@ -6324,26 +6246,39 @@ class WarView(BaseGameView):
         except Exception as _db_err:
             print(f"[WAR DB ERROR] {_db_err}")
 
-        if is_tie:
-            outcome_line = f"│ 🤝 **Tie** • Bets Returned"
-        elif won:
-            net_war = payout - self.bet
-            outcome_line = f"│ ✅ **You Win** • +{format_amount(net_war)} 💎"
-        else:
-            outcome_line = f"│ ❌ **You Lose** • -{format_amount(self.bet)} 💎"
-
-        result_embed = discord.Embed(
-            color=color,
-            description=(
-                f"## ⚔️  WAR\n"
-                f"┌─────────────────────────┐\n"
-                f"│ 💰 **Bet** • {format_amount(self.bet)} 💎\n"
-                f"│ 🃏 **{self.creator.display_name}** • {war_card_str(creator_card)}\n"
-                f"│ 🃏 **{opponent_name}** • {war_card_str(opponent_card)}\n"
-                f"{outcome_line}\n"
-                f"└─────────────────────────┘"
-            )
+        payout_line = (
+            f"↩️ **Bets returned**"
+            if is_tie else
+            f"💰 **Payout** • {format_amount(payout)} 💠"
         )
+        description = (
+            f"💰 **Bet** • {format_amount(self.bet)} 💠\
+"
+            f"\
+"
+            f"┌─────────────────────────┐\
+"
+            f"│ 🃏 **{self.creator.display_name}**\
+"
+            f"│ {war_card_str(creator_card)}\
+"
+            f"│\
+"
+            f"│ 🃏 **{opponent_name}**\
+"
+            f"│ {war_card_str(opponent_card)}\
+"
+            f"└─────────────────────────┘\
+"
+            f"\
+"
+            f"{payout_line}\
+"
+        )
+
+        result_embed = discord.Embed(color=color, description=f"## ⚔️  WAR — {title}\n{result_desc(won, False, self.bet, payout)}")
+        result_embed.add_field(name="💰 Bet",    value=f"**{format_amount(self.bet)}**",  inline=True)
+        result_embed.add_field(name="🎁 Payout", value=f"**{format_amount(payout)}**",   inline=True)
         result_embed.set_thumbnail(url=await get_avatar(self.creator))
         _brand_embed(result_embed)
         await asyncio.sleep(0.3)
@@ -6554,6 +6489,25 @@ class HiloView(BaseGameView):
         return embed
 
     # ── Bet deduction ─────────────────────────────────────────
+
+# ═══════════════════════════════════════════════════════════
+# END OF PART 1 — paste Part 2 directly below this line
+# ═══════════════════════════════════════════════════════════
+
+# ═══════════════════════════════════════════════════════════
+# SABPOT BOT — PART 2 OF 2
+# Paste this DIRECTLY below Part 1 in the same file (main.py)
+# ═══════════════════════════════════════════════════════════
+
+
+# ═══════════════════════════════════════════════════════════
+# END OF PART 1 — paste Part 2 directly below this line
+# ═══════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════
+# SABPOT BOT — PART 2 OF 2
+# Paste this DIRECTLY below Part 1 in the same file (main.py)
+# ═══════════════════════════════════════════════════════════
+
     async def _deduct_bet(self) -> bool:
         if self.bet_deducted:
             return True
@@ -6638,21 +6592,27 @@ class HiloView(BaseGameView):
                 guesses    = self.rounds_won
                 guess_word = f"{guesses} Correct Guess{'es' if guesses != 1 else ''}"
                 lose_desc  = (
-                    f"┌─────────────────────────┐\n"
-                    f"│ 💰 **Bet** • {format_amount(self.bet)} 💎\n"
-                    f"│ 📊 **Multiplier** • {self.current_mult:.2f}x\n"
-                    f"│ 💔 **Loss** • -{format_amount(self.bet)} 💎\n"
-                    f"│ 🎯 **Correct Guesses** • {guesses}\n"
-                    f"└─────────────────────────┘\n"
-                    f"\n"
-                    f"**Your Card:** {hilo_card_str(prev_card)}\n"
-                    f"**Next Card:** {hilo_card_str(new_card)}\n"
-                    f"\n"
-                    f"🎯 {guess_word} • Game Ended"
+                    f"┌─────────────────────────┐\
+"
+                    f"│ 💰 **Bet** • {format_amount(self.bet)} 💎\
+"
+                    f"│ 📊 **Multiplier** • {self.current_mult:.2f}x\
+"
+                    f"│ 💔 **Loss** • {format_amount(self.bet)} 💎\
+"
+                    f"│ 🎯 **Correct Guesses** • {guesses}\
+"
+                    f"└─────────────────────────┘\
+"
+                    f"\
+"
+                    f"**Your Card:** {hilo_card_str(prev_card)}\
+"
+                    f"**Next Card:** {hilo_card_str(new_card)}"
                 )
                 lose_embed = discord.Embed(
                     color=C_LOSS,
-                    description=f"## ❌  HI-LO — WRONG GUESS!\n{lose_desc}"
+                    description=f"## 🎴  HI-LO — WRONG\n{lose_desc}\n{result_desc(False, False, self.bet, 0)}"
                 )
                 _brand_embed(lose_embed)
 
@@ -6965,55 +6925,27 @@ class TowersView(BaseGameView):
     def game_embed(self, outcome: str = "playing") -> discord.Embed:
         if outcome == "playing":
             color = C_BLUE
-            header = "## 🗼  TOWERS"
+            title = "🏰  TOWERS"
         elif outcome == "win":
             color = C_WIN
-            header = "## 🗼  TOWERS — CASHOUT!"
+            title = "🏰  TOWERS — CASHED OUT"
         elif outcome == "bomb":
             color = C_LOSS
-            header = "## 🗼  TOWERS — 💥 BOOM!"
+            title = "🏰  TOWERS — 💥 BOOM"
         else:
             color = C_VIP
-            header = "## 🗼  TOWERS — CLEARED! 🏆"
+            title = "🏰  TOWERS — CLEARED"
 
-        payout = self.current_winnings
-        profit = payout - self.bet
-
-        if outcome == "bomb":
-            stat_box = (
-                f"┌─────────────────────────┐\n"
-                f"│ 💰 **Bet** • {format_amount(self.bet)} 💎\n"
-                f"│ 📊 **Multiplier** • {self.current_mult:.2f}x\n"
-                f"│ 🏗️ **Rows Cleared** • {self.rows_cleared}/{TOWER_ROWS}\n"
-                f"│ ❌ **Loss** • -{format_amount(self.bet)} 💎\n"
-                f"└─────────────────────────┘"
-            )
-        elif outcome in ("win", "cleared"):
-            profit_str = f"+{format_amount(profit)}" if profit >= 0 else f"-{format_amount(abs(profit))}"
-            stat_box = (
-                f"┌─────────────────────────┐\n"
-                f"│ 💰 **Bet** • {format_amount(self.bet)} 💎\n"
-                f"│ 📊 **Multiplier** • {self.current_mult:.2f}x\n"
-                f"│ 🏗️ **Rows Cleared** • {self.rows_cleared}/{TOWER_ROWS}\n"
-                f"│ ✅ **Profit** • {profit_str} 💎\n"
-                f"└─────────────────────────┘"
-            )
-        else:
-            stat_box = (
-                f"┌─────────────────────────┐\n"
-                f"│ 💰 **Bet** • {format_amount(self.bet)} 💎\n"
-                f"│ 📊 **Multiplier** • {self.current_mult:.2f}x\n"
-                f"│ 💵 **Cashout** • {format_amount(payout)} 💎\n"
-                f"│ 🏗️ **Row** • {self.current_row + 1}/{TOWER_ROWS}\n"
-                f"└─────────────────────────┘"
-            )
-
-        tower_str = render_tower(self.tower, self.current_row, self.revealed)
-        embed = discord.Embed(
-            color=color,
-            description=f"{header}\n{stat_box}\n\n{tower_str}"
+        embed = discord.Embed(color=color, title=title)
+        embed.add_field(
+            name="\​",
+            value=render_tower(self.tower, self.current_row, self.revealed),
+            inline=False
         )
-        embed.set_footer(text=f"Row {self.current_row + 1} • Pick 1, 2, or 3")
+        embed.add_field(name="Bet",                value=f"**{format_amount(self.bet)}** 💎",          inline=False)
+        embed.add_field(name="Multiplier",         value=f"**{self.current_mult:.2f}x**",              inline=False)
+        embed.add_field(name="Potential Winnings", value=f"**{format_amount(self.current_winnings)}** 💎", inline=False)
+        embed.set_footer(text=f"Row {self.current_row + 1} • Towers")
         return embed
 
     # ── Bet deduction ─────────────────────────────────────────
@@ -7482,9 +7414,6 @@ class RPSView(BaseGameView):
         embed.set_footer(text=f"🔒 Hash: {h[:20]}... | Streak: {self.wins}")
         return embed
 
-# ═══════════════════════════════════════════════════════════
-# END OF PART 1 — paste Part 2 directly below this line
-# ═══════════════════════════════════════════════════════════
 
 # ═══════════════════════════════════════════════════════════
 # PART 2 — paste this directly below Part 1
@@ -7615,9 +7544,6 @@ class RPSView(BaseGameView):
             await record_game(conn, self.creator.id, True, self.bet, payout)
 
 # ═══════════════════════════════════════════════════════════
-# END OF PART 1 — paste Part 2 directly below this line
-# ═══════════════════════════════════════════════════════════
-# ═══════════════════════════════════════════════════════════
 # PART 2 — paste this directly below Part 1
 # ═══════════════════════════════════════════════════════════
             await log_transaction(conn, self.creator.id, "rps_cashout", net)
@@ -7745,14 +7671,15 @@ MINES_GRID_SIZE = 25
 
 def mines_dynamic_factor(mines: int) -> float:
     """
-    Per-mine-count payout factor. Nerfed to reduce max payout potential.
+    Per-mine-count payout factor. Ensures first gem always pays > 1x.
+    Low mine counts need a higher factor so payouts feel meaningful.
     House edge comes from the 15% win tax applied on cashout.
     """
     safe = MINES_GRID_SIZE - mines
     if safe <= 0:
         return 0.01
     prob_first = safe / MINES_GRID_SIZE
-    # Nerfed target first-gem multipliers — lower payouts, stronger edge
+    # Target first-gem multiplier scales with risk level
     if mines == 1:
         target_first = 1.02
     elif mines <= 3:
@@ -7857,13 +7784,13 @@ class MinesView(BaseGameView):
 
     def game_embed(self, outcome: str = "playing") -> discord.Embed:
         gems_total = MINES_GRID_SIZE - self.mines
-        colors = {"playing": C_BLUE, "win": C_WIN, "loss": C_LOSS, "cleared": 0xFFD700}
-        color     = colors.get(outcome, C_BLUE)
-        game_over = outcome in ("win", "loss", "cleared")
-        payout    = self.current_winnings
-        profit    = payout - self.bet
+        colors     = {"playing": C_BLUE, "win": C_WIN, "loss": C_LOSS, "cleared": 0xFFD700}
+        color      = colors.get(outcome, C_BLUE)
+        game_over  = outcome in ("win", "loss", "cleared")
+        payout     = self.current_winnings
+        profit     = payout - self.bet
         profit_str = f"+{format_amount(profit)}" if profit >= 0 else f"-{format_amount(abs(profit))}"
-        grid_str  = mines_render_grid(self.grid, self.revealed, game_over=game_over)
+        grid_str   = mines_render_grid(self.grid, self.revealed, game_over=game_over)
 
         if outcome == "loss":
             stats = (
@@ -7903,7 +7830,6 @@ class MinesView(BaseGameView):
         embed = discord.Embed(color=color, description=f"{stats}\n\n{grid_str}")
         embed.set_footer(text=f"💣 {self.mines} Mines  •  {'Game Ended' if game_over else 'Pick a tile!'}")
         return embed
-
     async def _deduct_bet(self) -> bool:
         if self.bet_deducted:
             return True
@@ -8074,15 +8000,6 @@ class MinesView(BaseGameView):
 
                 print(f"[ERROR] {type(e).__name__}: {e}")
                 pass
-
-
-# ═══════════════════════════════════════════════════════════
-# END OF PART 1 — paste Part 2 directly below this line
-# ═══════════════════════════════════════════════════════════
-# ═══════════════════════════════════════════════════════════
-# SABPOT BOT — PART 2 OF 2
-# Paste this DIRECTLY below Part 1 in the same file (main.py)
-# ═══════════════════════════════════════════════════════════
 
 @bot.tree.command(name="mines", description="Play Mines — find gems and avoid bombs!")
 @app_commands.describe(bet="Bet amount e.g. 5k, 1M", mines="Number of mines (1-24)")
@@ -9295,22 +9212,24 @@ class SlotsView(BaseGameView):
 
         # Final result embed
         if won:
-            color    = C_WIN
-            net_line = f"│ ✅ **Win** • +{format_amount(payout - self.bet)} 💎"
+            color  = C_WIN
+            header = f"🎉  {result_label}"
+            net_str = f"+{format_amount(payout - self.bet)}"
         else:
-            color    = C_LOSS
-            net_line = f"│ ❌ **Loss** • -{format_amount(self.bet)} 💎"
+            color  = 0xE74C3C
+            header = f"💔  {result_label}"
+            net_str = f"-{format_amount(self.bet)}"
 
+        _slot_tag = "+" if won else "-"
         result_embed = discord.Embed(
             color=color,
             description=(
-                f"## 🎰  SLOTS — {result_label}\n"
+                f"## 🎰  SLOTS  —  {result_label}\n"
                 f"```\n  {_slots_reels_str(reels)}  \n```\n"
-                f"┌─────────────────────────┐\n"
-                f"│ 💰 **Bet** • {format_amount(self.bet)} 💎\n"
-                f"│ 📊 **Multiplier** • {mult}×\n"
-                f"{net_line}\n"
-                f"└─────────────────────────┘"
+                f"```diff\n"
+                f"{_slot_tag} {net_str}\n"
+                f"# {mult}×  ·  wager {format_amount(self.bet)}\n"
+                f"```"
             )
         )
         _brand_embed(result_embed)
@@ -10071,8 +9990,8 @@ class VerifyView(discord.ui.View):
                 suspended = await conn.fetchrow(
                     "SELECT 1 FROM suspended_invite_rewards WHERE user_id=$1", inviter_id)
                 if suspended:
-                    inviter_id = None
                     print(f"[INVITE] Rewards suspended for {inviter_id} — skipping on verify")
+                    inviter_id = None
 
             if inviter_id:
                 # Check already rewarded
@@ -13711,6 +13630,10 @@ async def reset_streak_quest(conn, user_id: int):
 async def update_quest_progress(conn, user_id: int, quest_type: str, game: str, amount: int = 1, bet: int = 0):
     """Update quest progress. Auto-pays reward the moment a quest completes — no /quests needed.
     tip and daily quests have no minimum bet requirement."""
+    try:
+        await ensure_quest_tables(conn)
+    except Exception:
+        pass
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     quests = get_daily_quests(user_id, today)
     for q in quests:
@@ -14201,6 +14124,70 @@ async def maybe_warn_spammer(user: discord.Member, reason: str):
         print(f"[MSG_REWARD] DM warning failed: {e}")
 
 
+
+
+
+
+# ═══════════════════════════════════════════════════════════
+# MESSAGE COUNTING — increments count on every valid message
+# ═══════════════════════════════════════════════════════════
+@bot.event
+async def on_message(message: discord.Message):
+    if not message.guild or message.author.bot or message.webhook_id:
+        return
+    if message.guild.id != GUILD_ID:
+        return
+
+    user = message.author
+    valid, reason = message_check(message.content, user.id)
+
+    if not valid:
+        await maybe_warn_spammer(user, reason)
+        return
+
+    import time as _mt
+    _msg_cooldowns[user.id]    = _mt.time()
+    _msg_last_text[user.id]    = " ".join(message.content.lower().split())
+    _msg_spam_strikes[user.id] = 0
+
+    conn = await get_conn()
+    try:
+        await ensure_message_tables(conn)
+        row = await conn.fetchrow(
+            "SELECT total_count FROM message_counts WHERE user_id=$1",
+            str(user.id)
+        )
+        old_total = row["total_count"] if row else 0
+        new_total = old_total + 1
+        hit_milestone = (new_total % MESSAGE_REWARD_EVERY == 0)
+
+        await conn.execute("""
+            INSERT INTO message_counts (user_id, total_count, unclaimed_miles, total_claimed)
+            VALUES ($1, 1, 0, 0)
+            ON CONFLICT (user_id) DO UPDATE SET
+                total_count     = message_counts.total_count + 1,
+                unclaimed_miles = message_counts.unclaimed_miles
+                                  + CASE WHEN (message_counts.total_count + 1) % $2 = 0 THEN 1 ELSE 0 END
+        """, str(user.id), MESSAGE_REWARD_EVERY)
+
+        if hit_milestone:
+            try:
+                note = discord.Embed(
+                    title="🎉 Message Milestone!",
+                    description=(
+                        f"You've sent **{new_total}** messages!\n"
+                        f"Use `/redeemmessagerewards` to claim **{format_amount(MESSAGE_REWARD_AMOUNT)}** 💎!"
+                    ),
+                    color=C_VIP
+                )
+                _brand_embed(note)
+                await user.send(embed=note)
+            except Exception:
+                pass
+    except Exception as e:
+        print(f"[MSG_REWARD] on_message error for {user}: {e}")
+    finally:
+        await release_conn(conn)
 
 
 # ═══════════════════════════════════════════════════════════
@@ -15619,570 +15606,4 @@ ACHIEVEMENTS = [
     {"id":"rain_catch_50",  "emoji":"🌊", "name":"Flood Survivor",     "desc":"Catch 50 rain drops",                   "cat":"social",   "check": lambda r,x: x.get("rain_count",0) >= 50},
     {"id":"cb_win",         "emoji":"⚔️","name":"Battle Tested",       "desc":"Win a case battle",                     "cat":"social",   "check": lambda r,x: x.get("cb_wins",0) >= 1},
     {"id":"cb_win_10",      "emoji":"🏆", "name":"Battle Hardened",    "desc":"Win 10 case battles",                   "cat":"social",   "check": lambda r,x: x.get("cb_wins",0) >= 10},
-    {"id":"cb_win_50",      "emoji":"👹", "name":"Battle God",         "desc":"Win 50 case battles",                   "cat":"social",   "check": lambda r,x: x.get("cb_wins",0) >= 50},
-    {"id":"cb_played_50",   "emoji":"🎪", "name":"Arena Regular",      "desc":"Play 50 case battles",                  "cat":"social",   "check": lambda r,x: x.get("cb_played",0) >= 50},
-    {"id":"cb_played_200",  "emoji":"🗡️","name":"Arena Veteran",       "desc":"Play 200 case battles",                 "cat":"social",   "check": lambda r,x: x.get("cb_played",0) >= 200},
-    {"id":"giveaway_win",   "emoji":"🎉", "name":"Lucky Winner",       "desc":"Win a giveaway",                        "cat":"social",   "check": lambda r,x: x.get("giveaway_wins",0) >= 1},
-    {"id":"giveaway_win_5", "emoji":"🎊", "name":"Giveaway Magnet",    "desc":"Win 5 giveaways",                       "cat":"social",   "check": lambda r,x: x.get("giveaway_wins",0) >= 5},
-    # ══════════════════════════════════════════════════════
-    # PRESTIGE
-    # ══════════════════════════════════════════════════════
-    {"id":"prestige_netpos", "emoji":"📊","name":"In the Green",       "desc":"Have a positive net P&L",               "cat":"prestige", "check": lambda r,x: (r["balance"] - r["wagered"]) > 0},
-    {"id":"prestige_2xwager","emoji":"✨","name":"Doubled Up",         "desc":"Have balance 2× your total wagered",     "cat":"prestige", "check": lambda r,x: r["wagered"] > 0 and r["balance"] >= r["wagered"] * 2},
-    {"id":"prestige_allgames","emoji":"🎯","name":"Jack of All Trades","desc":"Play every game type at least once",      "cat":"prestige", "check": lambda r,x: x.get("unique_games",0) >= 14},
-    {"id":"prestige_10cat",  "emoji":"🌐","name":"Completionist",      "desc":"Unlock 10+ achievements",               "cat":"prestige", "check": lambda r,x: x.get("total_unlocked",0) >= 10},
-    {"id":"prestige_50cat",  "emoji":"💫","name":"Achievement Hunter", "desc":"Unlock 50+ achievements",               "cat":"prestige", "check": lambda r,x: x.get("total_unlocked",0) >= 50},
-    {"id":"prestige_all",    "emoji":"🔱","name":"Legend",             "desc":"Unlock every achievement",              "cat":"prestige", "check": lambda r,x: x.get("total_unlocked",0) >= 99},
-    # ── 4 more to complete the 100 ──────────────────────
-    {"id":"progressive_cf",  "emoji":"📈","name":"Press Your Luck",    "desc":"Win a progressive coinflip",            "cat":"games",    "check": lambda r,x: x.get("prog_cf_wins",0) >= 1},
-    {"id":"progressive_dice","emoji":"🎰","name":"Dice Chain",         "desc":"Win a progressive dice game",           "cat":"games",    "check": lambda r,x: x.get("prog_dice_wins",0) >= 1},
-    {"id":"wager_50m",       "emoji":"💵","name":"Serious Money",      "desc":"Wager 10,000 gems total",                "cat":"economy",  "check": lambda r,x: r["wagered"] >= 1_000_000},
-    {"id":"lose_100",        "emoji":"🎭","name":"Drama King",         "desc":"Lose 100 games total",                  "cat":"gambling", "check": lambda r,x: r["losses"] >= 100},
-    # ── Secret ──────────────────────────────────────────
-    {"id":"secret_tipself",  "emoji":"🤫","name":"Self Tipper",        "desc":"Something suspicious happened...",       "cat":"prestige", "check": lambda r,x: x.get("tipped_self", False)},
-    {"id":"secret_negative", "emoji":"😈","name":"Down Bad",           "desc":"Lose more than 10,000 gems total",        "cat":"prestige", "check": lambda r,x: (r["wagered"] - r["balance"]) >= 1_000_000},
-    {"id":"secret_bigbet",   "emoji":"🃏","name":"All In",             "desc":"Wager 5,000+ gems in a single game",      "cat":"prestige", "check": lambda r,x: x.get("biggest_single_bet",0) >= 500_000},
-    {"id":"secret_og",       "emoji":"🏛️","name":"OG",                 "desc":"One of the first 10 users",             "cat":"prestige", "check": lambda r,x: x.get("is_og", False)},
-]
-
-_ACH_MAP    = {a["id"]: a for a in ACHIEVEMENTS}
-_CAT_LABELS = {
-    "gambling": "🎲 Gambling",
-    "games":    "🎮 Game Milestones",
-    "economy":  "💰 Economy",
-    "social":   "🤝 Social",
-    "prestige": "🔱 Prestige & Secret",
-}
-
-
-async def _ensure_ach_table(conn):
-    await conn.execute(
-        "CREATE TABLE IF NOT EXISTS achievements ("
-        "user_id TEXT NOT NULL, achievement TEXT NOT NULL,"
-        "unlocked_at TEXT NOT NULL DEFAULT '',"
-        "PRIMARY KEY (user_id, achievement))"
-    )
-
-
-async def _get_unlocked(conn, user_id: int) -> set:
-    try:
-        rows = await conn.fetch(
-            "SELECT achievement FROM achievements WHERE user_id=$1", str(user_id))
-        return {r["achievement"] for r in rows}
-    except Exception:
-        return set()
-
-
-async def _get_ach_extra(conn, user_id: int) -> dict:
-    uid  = str(user_id)
-    xtra = {}
-
-    async def _cnt(q, *args):
-        try:
-            r = await conn.fetchrow(q, *args)
-            return r["c"] if r else 0
-        except Exception:
-            return 0
-
-    async def _maxval(q, *args):
-        try:
-            r = await conn.fetchrow(q, *args)
-            return r["m"] if r else 0
-        except Exception:
-            return 0
-
-    # ── Economy / daily ───────────────────────────────────
-    xtra["daily_count"] = await _cnt("SELECT COUNT(*) AS c FROM transactions WHERE user_id=$1 AND action='daily'", uid)
-    xtra["rain_count"]  = await _cnt("SELECT COUNT(*) AS c FROM transactions WHERE user_id=$1 AND action='rain_recv'", uid)
-    xtra["promo_count"] = await _cnt("SELECT COUNT(*) AS c FROM transactions WHERE user_id=$1 AND action='promo_redeem'", uid)
-    xtra["biggest_win"] = await _maxval(
-        "SELECT COALESCE(MAX(amount),0) AS m FROM transactions WHERE user_id=$1 AND amount>0 "
-        "AND action NOT IN ('daily','tip_recv','rain_recv','promo_redeem','addcoins','casebattle_refund')", uid)
-    xtra["biggest_single_bet"] = await _maxval(
-        "SELECT COALESCE(MAX(ABS(amount)),0) AS m FROM transactions WHERE user_id=$1 AND amount<0 "
-        "AND action NOT IN ('tip_sent','casebattle_entry')", uid)
-
-    # ── Per-game win/event counts ─────────────────────────
-    xtra["cf_wins"]          = await _cnt("SELECT COUNT(*) AS c FROM transactions WHERE user_id=$1 AND action='coinflip_win'", uid)
-    xtra["dice_wins"]        = await _cnt("SELECT COUNT(*) AS c FROM transactions WHERE user_id=$1 AND action='dice_win'", uid)
-    xtra["bj_wins"]          = await _cnt("SELECT COUNT(*) AS c FROM transactions WHERE user_id=$1 AND action='blackjack' AND amount>0", uid)
-    xtra["rlt_wins"]         = await _cnt("SELECT COUNT(*) AS c FROM transactions WHERE user_id=$1 AND action='roulette' AND amount>0", uid)
-    xtra["baccarat_wins"]    = await _cnt("SELECT COUNT(*) AS c FROM transactions WHERE user_id=$1 AND action='baccarat' AND amount>0", uid)
-    xtra["war_wins"]         = await _cnt("SELECT COUNT(*) AS c FROM transactions WHERE user_id=$1 AND action='war_win'", uid)
-    xtra["rps_wins"]         = await _cnt("SELECT COUNT(*) AS c FROM transactions WHERE user_id=$1 AND action IN ('rps_cashout','progressive_rps') AND amount>0", uid)
-    xtra["hilo_cashouts"]    = await _cnt("SELECT COUNT(*) AS c FROM transactions WHERE user_id=$1 AND action IN ('hilo_cashout','hilo_timeout_cashout') AND amount>0", uid)
-    xtra["scratch_wins"]     = await _cnt("SELECT COUNT(*) AS c FROM transactions WHERE user_id=$1 AND action='scratch' AND amount>0", uid)
-    xtra["horse_wins"]       = await _cnt("SELECT COUNT(*) AS c FROM transactions WHERE user_id=$1 AND action='horserace' AND amount>0", uid)
-    xtra["upgrader_wins"]    = await _cnt("SELECT COUNT(*) AS c FROM transactions WHERE user_id=$1 AND action='upgrader' AND amount>0", uid)
-    xtra["cdice_wins"]       = await _cnt("SELECT COUNT(*) AS c FROM transactions WHERE user_id=$1 AND action='colordice' AND amount>0", uid)
-    xtra["balloon_pops"]     = await _cnt("SELECT COUNT(*) AS c FROM transactions WHERE user_id=$1 AND action='balloon_pop'", uid)
-    xtra["balloon_cashouts"] = await _cnt("SELECT COUNT(*) AS c FROM transactions WHERE user_id=$1 AND action IN ('balloon_cashout','balloon_timeout_cashout') AND amount>0", uid)
-    xtra["mines_clears"]     = await _cnt("SELECT COUNT(*) AS c FROM transactions WHERE user_id=$1 AND action='mines_clear'", uid)
-    xtra["mines_cashouts"]   = await _cnt("SELECT COUNT(*) AS c FROM transactions WHERE user_id=$1 AND action IN ('mines_cashout','mines_timeout_cashout') AND amount>0", uid)
-    xtra["towers_clears"]    = await _cnt("SELECT COUNT(*) AS c FROM transactions WHERE user_id=$1 AND action='towers_clear'", uid)
-    xtra["giveaway_wins"]    = await _cnt("SELECT COUNT(*) AS c FROM transactions WHERE user_id=$1 AND action='giveaway_win'", uid)
-    xtra["prog_cf_wins"]     = await _cnt("SELECT COUNT(*) AS c FROM transactions WHERE user_id=$1 AND action='progressive_coinflip' AND amount>0", uid)
-    xtra["prog_dice_wins"]   = await _cnt("SELECT COUNT(*) AS c FROM transactions WHERE user_id=$1 AND action='progressive_dice' AND amount>0", uid)
-
-    # ── Case battles ─────────────────────────────────────
-    xtra["cb_wins"] = await _cnt(
-        "SELECT COUNT(*) AS c FROM case_battle_players cbp JOIN case_battles cb ON cbp.battle_id=cb.id "
-        "WHERE cbp.user_id=$1 AND cb.status='finished' AND cb.winner_ids LIKE '%' || $1 || '%'", uid)
-    xtra["cb_played"] = await _cnt(
-        "SELECT COUNT(*) AS c FROM case_battle_players WHERE user_id=$1 AND is_bot=FALSE", uid)
-
-    # ── Worst loss streak ─────────────────────────────────
-    try:
-        rows = await conn.fetch(
-            "SELECT action, amount FROM transactions WHERE user_id=$1 ORDER BY id ASC LIMIT 1000", uid)
-        _skip = {"daily","tip_recv","rain_recv","promo_redeem","addcoins","casebattle_refund","casebattle_entry","tip_sent"}
-        cur_loss = worst = 0
-        for tx in rows:
-            if tx["amount"] < 0 and tx["action"] not in _skip:
-                cur_loss += 1
-                worst = max(worst, cur_loss)
-            elif tx["amount"] > 0 and tx["action"] not in _skip:
-                cur_loss = 0
-        xtra["worst_streak"] = worst
-    except Exception:
-        xtra["worst_streak"] = 0
-
-    # ── Comeback (win after 5+ loss run) ──────────────────
-    try:
-        rows = await conn.fetch(
-            "SELECT action, amount FROM transactions WHERE user_id=$1 ORDER BY id DESC LIMIT 150", uid)
-        _skip2 = {"daily","tip_recv","rain_recv","promo_redeem","addcoins","casebattle_refund","casebattle_entry"}
-        loss_run = 0
-        comeback = False
-        for tx in rows:
-            if tx["amount"] < 0 and tx["action"] not in _skip2:
-                loss_run += 1
-            elif tx["amount"] > 0 and tx["action"] not in _skip2:
-                if loss_run >= 5:
-                    comeback = True
-                    break
-                loss_run = 0
-        xtra["had_comeback"] = comeback
-    except Exception:
-        xtra["had_comeback"] = False
-
-    # ── Hit zero balance ─────────────────────────────────
-    try:
-        r = await conn.fetchrow("SELECT balance FROM users WHERE user_id=$1", uid)
-        xtra["hit_zero"] = bool(r and r["balance"] == 0)
-    except Exception:
-        xtra["hit_zero"] = False
-
-    # ── Unique game types played ──────────────────────────
-    try:
-        _game_actions = {
-            "coinflip_win","coinflip_loss","dice_win","dice_loss","blackjack","roulette","baccarat",
-            "war_win","war_loss","hilo_cashout","hilo_loss","towers_clear","towers_cashout","towers_loss",
-            "rps_cashout","rps_loss","mines_cashout","mines_clear","mines_loss","scratch","horserace",
-            "upgrader","colordice","balloon_pop","balloon_cashout","casebattle_win","casebattle_entry",
-        }
-        rows = await conn.fetch("SELECT DISTINCT action FROM transactions WHERE user_id=$1", uid)
-        xtra["unique_games"] = len({r["action"] for r in rows} & _game_actions)
-    except Exception:
-        xtra["unique_games"] = 0
-
-    # ── Total achievements unlocked (for meta-achievements) ──
-    try:
-        r = await conn.fetchrow("SELECT COUNT(*) AS c FROM achievements WHERE user_id=$1", uid)
-        xtra["total_unlocked"] = r["c"] if r else 0
-    except Exception:
-        xtra["total_unlocked"] = 0
-
-    # ── OG user (one of first 10 registrations) ──────────
-    try:
-        rows = await conn.fetch("SELECT user_id FROM users ORDER BY created_at ASC LIMIT 10")
-        xtra["is_og"] = uid in {r["user_id"] for r in rows}
-    except Exception:
-        xtra["is_og"] = False
-
-    # ── Self-tip ─────────────────────────────────────────
-    try:
-        r = await conn.fetchrow(
-            "SELECT COUNT(*) AS c FROM transactions WHERE user_id=$1 AND action='tip_sent' AND note LIKE '%' || $1 || '%'", uid)
-        xtra["tipped_self"] = bool(r and r["c"] > 0)
-    except Exception:
-        xtra["tipped_self"] = False
-
-    return xtra
-
-async def check_and_grant_achievements(conn, user_id: int, row) -> list:
-    """Grant newly earned achievements. Returns list of newly unlocked dicts."""
-    try:
-        await _ensure_ach_table(conn)
-        unlocked = await _get_unlocked(conn, user_id)
-        xtra     = await _get_ach_extra(conn, user_id)
-        newly    = []
-        for ach in ACHIEVEMENTS:
-            if ach["id"] in unlocked: continue
-            try:
-                if ach["check"](row, xtra):
-                    await conn.execute(
-                        "INSERT INTO achievements (user_id, achievement, unlocked_at) "
-                        "VALUES ($1,$2,$3) ON CONFLICT DO NOTHING",
-                        str(user_id), ach["id"], now_ts())
-                    newly.append(ach)
-            except Exception:
-                pass
-        return newly
-    except Exception as e:
-        print(f"[ACHIEVEMENTS] error: {e}")
-        return []
-
-
-def _build_ach_display(unlocked: set) -> str:
-    """Per-category achievement display string for /stats."""
-    sections = []
-    for cat, label in _CAT_LABELS.items():
-        cat_list = [a for a in ACHIEVEMENTS if a["cat"] == cat]
-        done     = sum(1 for a in cat_list if a["id"] in unlocked)
-        parts    = []
-        for a in cat_list:
-            if a["id"] in unlocked:
-                parts.append(f"{a['emoji']} **{a['name']}**")
-            else:
-                parts.append(f"🔒 {a['name']}")
-        sections.append(f"**{label}** {done}/{len(cat_list)}\n" + "  ·  ".join(parts))
-    return "\n\n".join(sections)
-
-
-# ══════════════════════════════════════════════════════════════
-# /disable — Owner kill switch (shuts bot down, harms nothing)
-# Only usable by the specific owner user ID
-# ══════════════════════════════════════════════════════════════
-
-# ══════════════════════════════════════════════════════════════
-# Auto channel cleanup loop — runs every 60 seconds
-# Deletes any channel not in the approved list
-# ══════════════════════════════════════════════════════════════
-APPROVED_CHANNELS_GLOBAL = {
-    # RULES
-    "📋┃rules",
-    # IMPORTANT
-    "📢┃announcements", "📢┃bot-announcements",
-    "🎁┃giveaways", "✅┃are-we-legit",
-    # Extra
-    "🎁┃tips", "✨┃rain", "🎁┃promo-codes", "💜┃boost-rewards", "🚨┃withdrawals",
-    "💸┃tipping",        # public tipping feed (read-only for members)
-    # Chat
-    "💬┃general", "🖼️┃media", "🤝┃vouch",
-    # Verification
-    "✅┃verify",
-    # VIP GAMBLING
-    "👑┃vip-lounge", "💎・vip-room",
-    # Gambling rooms
-    "🎰┃coinflip", "🎲┃room-1", "🎲┃room-2",
-    # Deposits
-    "💳┃deposits",
-    # LOGS — all admin-only except tipping (above)
-    "📊┃game-log", "💰┃finance-log", "💸┃tip-log",
-    "📨┃invite-log", "✅┃verify-log", "✅┃are-we-legit-log",
-    "🚨┃withdraws",
-}
-
-async def channel_cleanup_loop():
-    """Background task — deletes unapproved channels every 60 seconds."""
-    await bot.wait_until_ready()
-    await asyncio.sleep(20)  # brief startup delay
-    while not bot.is_closed():
-        try:
-            guild = bot.get_guild(GUILD_ID)
-            if guild:
-                for ch in list(guild.text_channels):
-                    ch_name = ch.name.lower()
-                    # Keep approved channels
-                    if ch.name in APPROVED_CHANNELS_GLOBAL:
-                        continue
-                    # Keep user-created VIP rooms (💎・ but not the default placeholder)
-                    if ch.name.startswith("💎・") and ch.name != "💎・vip-room":
-                        continue
-                    # Keep withdrawal ticket channels (withdraw-username)
-                    if ch_name.startswith("withdraw-") and ch_name != "withdraws":
-                        continue
-                    # Keep deposit ticket channels (deposit-username)
-                    if ch_name.startswith("deposit-"):
-                        continue
-                    try:
-                        await ch.delete(reason="SABFlippy auto-cleanup: unapproved channel")
-                        print(f"[CLEANUP] Deleted unapproved channel: #{ch.name}")
-                    except Exception as e:
-                        print(f"[CLEANUP] Could not delete #{ch.name}: {e}")
-        except Exception as e:
-            print(f"[CLEANUP] Loop error: {e}")
-        await asyncio.sleep(60)
-
-
-# ══════════════════════════════════════════════════════════════
-# /close — Closes the withdrawal ticket channel it's used in
-# ══════════════════════════════════════════════════════════════
-@bot.tree.command(name="close", description="Close the withdrawal ticket in this channel.")
-async def cmd_close(interaction: discord.Interaction):
-    ch = interaction.channel
-    ch_name = ch.name.lower() if ch else ""
-
-    # Must be a withdraw- ticket channel (not the main withdrawals channel)
-    if not (ch_name.startswith("withdraw-") and ch_name != "withdraws" and ch_name != "withdrawals"):
-        await interaction.response.send_message(
-            "❌ **No ticket found.** This command can only be used inside a withdrawal ticket channel.",
-            ephemeral=True
-        )
-        return
-
-    # Only staff/admin/owner can close
-    member = interaction.user
-    allowed_roles = {STAFF_ROLE_NAME, ADMIN_ROLE_NAME, OWNER_ROLE_NAME}
-    has_perms = any(r.name in allowed_roles for r in member.roles)
-    if not has_perms:
-        await interaction.response.send_message(
-            "❌ You don't have permission to close tickets.",
-            ephemeral=True
-        )
-        return
-
-    close_e = discord.Embed(
-        color=0xFF4444,
-        description=(
-            f"🔒 **Ticket Closed**\n\n"
-            f"**Closed by:** {member.mention}\n"
-            f"**Channel:** `#{ch.name}`\n\n"
-            f"This channel will be deleted in **5 seconds**."
-        )
-    )
-    _brand_embed(close_e)
-    await interaction.response.send_message(embed=close_e)
-
-    # Update DB status
-    try:
-        conn = await get_conn()
-        try:
-            await conn.execute(
-                "UPDATE withdrawals_queue SET status='closed' WHERE channel_id=$1 AND status='pending'",
-                str(ch.id)
-            )
-        finally:
-            await release_conn(conn)
-    except Exception as e:
-        print(f"[CLOSE] DB update error: {e}")
-
-    # Log the closure to withdraws
-    try:
-        guild = bot.get_guild(GUILD_ID)
-        if guild:
-            withdraw_log_ch = discord.utils.get(guild.text_channels, name="🚨┃withdraws")
-            if withdraw_log_ch:
-                closed_e = discord.Embed(
-                    color=0xFF4444,
-                    description=(
-                        f"🔒 **Ticket Closed**\n\n"
-                        f"**Closed by:** {member.mention}\n"
-                        f"**Channel:** `#{ch.name}`"
-                    )
-                )
-                _brand_embed(closed_e)
-                await withdraw_log_ch.send(embed=closed_e)
-    except Exception as e:
-        print(f"[CLOSE] Could not log closure: {e}")
-
-    await asyncio.sleep(5)
-    try:
-        await ch.delete(reason=f"Ticket closed by {member}")
-        print(f"[CLOSE] Ticket channel #{ch.name} closed by {member}")
-    except Exception as e:
-        print(f"[CLOSE] Could not delete channel: {e}")
-
-
-
-# ══════════════════════════════════════════════════════════════
-# /lock — Lock a game to staff only (dropdown of all games)
-# /unlock — Unlock a previously locked game
-# Only Owner / Admin / Staff can use these
-# ══════════════════════════════════════════════════════════════
-
-class GameLockSelect(discord.ui.Select):
-    def __init__(self, action: str):
-        self.action = action  # "lock" or "unlock"
-        if action == "lock":
-            eligible = {k: v for k, v in ALL_GAMES.items() if v not in LOCKED_GAMES}
-            placeholder = "Select a game to lock..."
-        else:
-            eligible = {k: v for k, v in ALL_GAMES.items() if v in LOCKED_GAMES}
-            placeholder = "Select a game to unlock..."
-
-        options = [
-            discord.SelectOption(label=label, value=key)
-            for label, key in eligible.items()
-        ] if eligible else [
-            discord.SelectOption(label="No games available", value="none")
-        ]
-
-        super().__init__(
-            placeholder=placeholder,
-            min_values=1,
-            max_values=1,
-            options=options[:25],
-        )
-
-    async def callback(self, interaction: discord.Interaction):
-        # Re-check permissions inside callback
-        allowed = {OWNER_ROLE_NAME, ADMIN_ROLE_NAME, STAFF_ROLE_NAME}
-        if not any(r.name in allowed for r in interaction.user.roles):
-            await interaction.response.send_message("❌ No permission.", ephemeral=True)
-            return
-
-        selected = self.values[0]
-        if selected == "none":
-            await interaction.response.send_message("❌ Nothing to change.", ephemeral=True)
-            return
-
-        # Find display label
-        game_label = next((lbl for lbl, key in ALL_GAMES.items() if key == selected), selected)
-
-        if self.action == "lock":
-            LOCKED_GAMES.add(selected)
-            color = 0xFF4444
-            status = "🔒 Locked"
-            desc = (
-                f"🔒 **{game_label}** has been **locked**.\n\n"
-                f"Only **{OWNER_ROLE_NAME}**, **{ADMIN_ROLE_NAME}**, and **{STAFF_ROLE_NAME}** can play it.\n"
-                f"All other members will be blocked."
-            )
-        else:
-            LOCKED_GAMES.discard(selected)
-            color = 0x57F287
-            status = "🔓 Unlocked"
-            desc = (
-                f"🔓 **{game_label}** has been **unlocked**.\n\n"
-                f"All members can play it again."
-            )
-
-        e = discord.Embed(color=color, description=desc)
-        e.add_field(name="Game", value=game_label, inline=True)
-        e.add_field(name="Status", value=status, inline=True)
-        e.add_field(name="By", value=interaction.user.mention, inline=True)
-        _brand_embed(e)
-        await interaction.response.edit_message(embed=e, view=None)
-
-        # Log to finance log
-        log_e = discord.Embed(
-            color=color,
-            description=f"## {'🔒' if self.action == 'lock' else '🔓'} GAME {'LOCKED' if self.action == 'lock' else 'UNLOCKED'}"
-        )
-        log_e.add_field(name="Game",   value=game_label,              inline=True)
-        log_e.add_field(name="Status", value=status,                  inline=True)
-        log_e.add_field(name="Staff",  value=interaction.user.mention, inline=True)
-        log_e.set_footer(text=now_ts())
-        await send_finance_log(log_e)
-
-
-class GameLockView(discord.ui.View):
-    def __init__(self, action: str):
-        super().__init__(timeout=60)
-        self.add_item(GameLockSelect(action))
-
-
-@bot.tree.command(name="lock", description="[Staff] Lock a game so only staff can play it.")
-async def cmd_lock(interaction: discord.Interaction):
-    allowed = {OWNER_ROLE_NAME, ADMIN_ROLE_NAME, STAFF_ROLE_NAME}
-    if not any(r.name in allowed for r in interaction.user.roles):
-        await interaction.response.send_message("❌ You don't have permission to lock games.", ephemeral=True)
-        return
-
-    unlocked = [lbl for lbl, key in ALL_GAMES.items() if key not in LOCKED_GAMES]
-    locked   = [lbl for lbl, key in ALL_GAMES.items() if key in LOCKED_GAMES]
-
-    e = discord.Embed(
-        color=0xFF4444,
-        description=(
-            f"🔒 **Lock a Game**\n\n"
-            f"Select a game from the dropdown below to lock it.\n"
-            f"Locked games can only be played by **{OWNER_ROLE_NAME}**, **{ADMIN_ROLE_NAME}**, and **{STAFF_ROLE_NAME}**.\n\n"
-            f"**Currently locked:** {', '.join(locked) if locked else 'None'}\n"
-            f"**Available to lock:** {len(unlocked)} game(s)"
-        )
-    )
-    _brand_embed(e)
-
-    if not unlocked:
-        await interaction.response.send_message("✅ All games are already locked.", ephemeral=True)
-        return
-
-    await interaction.response.send_message(embed=e, view=GameLockView("lock"), ephemeral=True)
-
-
-@bot.tree.command(name="unlock", description="[Staff] Unlock a locked game so everyone can play.")
-async def cmd_unlock(interaction: discord.Interaction):
-    allowed = {OWNER_ROLE_NAME, ADMIN_ROLE_NAME, STAFF_ROLE_NAME}
-    if not any(r.name in allowed for r in interaction.user.roles):
-        await interaction.response.send_message("❌ You don't have permission to unlock games.", ephemeral=True)
-        return
-
-    if not LOCKED_GAMES:
-        await interaction.response.send_message("✅ No games are currently locked.", ephemeral=True)
-        return
-
-    locked = [lbl for lbl, key in ALL_GAMES.items() if key in LOCKED_GAMES]
-
-    e = discord.Embed(
-        color=0x57F287,
-        description=(
-            f"🔓 **Unlock a Game**\n\n"
-            f"Select a game from the dropdown to unlock it for all members.\n\n"
-            f"**Currently locked:** {', '.join(locked)}"
-        )
-    )
-    _brand_embed(e)
-    await interaction.response.send_message(embed=e, view=GameLockView("unlock"), ephemeral=True)
-
-
-SABPOT_OWNER_ID = 1392765245532930068
-
-@bot.tree.command(name="disable", description="Shut down the bot.")
-async def cmd_disable(interaction: discord.Interaction):
-    if interaction.user.id != SABPOT_OWNER_ID:
-        await interaction.response.send_message("❌ You don't have permission to use this command.", ephemeral=True)
-        return
-    await interaction.response.send_message("🔴 Bot shutting down.", ephemeral=True)
-    print(f"[DISABLE] Shutdown triggered by {interaction.user} ({interaction.user.id})")
-    await bot.close()
-
-
-async def main():
-    import traceback
-    if not TOKEN:
-        print("❌ TOKEN is not set! Add TOKEN to Railway environment variables.")
-        return
-    if not DATABASE_URL:
-        print("❌ DATABASE_URL is not set! Add it in Railway Variables.")
-        return
-    print("🚀 Starting Sabpot Bot...")
-    print(f"🔑 TOKEN set: {'Yes' if TOKEN else 'NO - MISSING'}")
-    print(f"🗄️ DATABASE_URL set: {'Yes' if DATABASE_URL else 'NO - MISSING'}")
-    print("⚠️  Make sure SERVER MEMBERS INTENT + MESSAGE CONTENT INTENT are enabled in Discord Dev Portal!")
-    try:
-        async with bot:
-            await bot.start(TOKEN)
-    except discord.LoginFailure:
-        print("❌ INVALID TOKEN — Go to Railway Variables and check TOKEN.")
-    except discord.PrivilegedIntentsRequired:
-        print("❌ PRIVILEGED INTENTS NOT ENABLED!")
-        print("   Go to: discord.com/developers/applications → Your Bot → Bot tab")
-        print("   Enable: SERVER MEMBERS INTENT and MESSAGE CONTENT INTENT")
-    except Exception as e:
-        print(f"❌ Bot crashed: {type(e).__name__}: {e}")
-        traceback.print_exc()
-
-import asyncio
-import traceback
-
-print("🔍 Loading bot modules...")
-try:
-    asyncio.run(main())
-except KeyboardInterrupt:
-    print("Bot stopped.")
-except Exception as e:
-    print(f"❌ FATAL CRASH: {type(e).__name__}: {e}")
-    traceback.print_exc()
+    {"id":"cb_win_50",      "emoji":"👹", "name":"Battle God",         "desc":"Win 50 case battles",                   "cat":"social",   "check": lambda r,x: x.get("cb_wins"
