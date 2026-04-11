@@ -1582,38 +1582,29 @@ async def _auto_create_roles():
 
 async def _auto_create_channels():
     """Auto-create all channels/categories and DELETE any that aren't in the approved list."""
-    await asyncio.sleep(5)  # Wait for roles to be created first
+    await asyncio.sleep(5)
     guild = bot.get_guild(GUILD_ID)
     if not guild:
         return
 
-    # ── Exact approved channel names (must match screenshot exactly) ──
     APPROVED_CHANNELS = {
-        # RULES
         "📋┃rules",
-        # IMPORTANT
         "📢┃announcements",
         "📢┃bot-announcements",
         "🎁┃giveaways",
         "✅┃are-we-legit",
-        # EXTRA
         "🎁┃tips",
         "✨┃rain",
         "🎁┃promo-codes",
         "💜┃boost-rewards",
         "🚨┃withdrawals",
-        # CHAT
         "💬┃general",
         "🖼️┃media",
         "🤝┃vouch",
-        # VERIFICATION
         "✅┃verify",
-        # VIP
         "👑┃vip-lounge",
         "💎・vip-room",
-        # DEPOSITS
         "💳┃deposits",
-        # LOGS
         "📊┃game-log",
         "💰┃finance-log",
         "💸┃tip-log",
@@ -1635,7 +1626,6 @@ async def _auto_create_channels():
         "📊 LOGS",
     }
 
-    # Get roles (may have just been created)
     def get_role(name):
         return discord.utils.get(guild.roles, name=name)
 
@@ -1646,19 +1636,17 @@ async def _auto_create_channels():
     verified_role = get_role(VERIFIED_ROLE_NAME)
     member_role   = get_role(MEMBER_ROLE_NAME)
 
-    # ── DELETE channels not in approved list ──
-    # VIP rooms created by users are kept (they start with 💎・ and aren't the default one)
+    # DELETE unapproved channels — but NEVER delete tickets
     for ch in list(guild.text_channels):
         if ch.name in APPROVED_CHANNELS:
             continue
-        # Keep user-created VIP rooms (💎・ prefix but not the default vip-room)
         if ch.name.startswith("💎・") and ch.name != "💎・vip-room":
             continue
-        # Keep wd- withdrawal ticket channels
         if ch.name.lower().startswith("wd-"):
             continue
-        # Keep deposit ticket channels
         if ch.name.lower().startswith("deposit-"):
+            continue
+        if ch.name.lower().startswith("ticket-"):
             continue
         try:
             await ch.delete(reason="Sabpot auto-cleanup: channel not in approved layout")
@@ -1666,14 +1654,12 @@ async def _auto_create_channels():
         except Exception as e:
             print(f"[SETUP] Could not delete #{ch.name}: {e}")
 
-    # ── DELETE categories not in approved list ──
+    # DELETE empty unapproved categories
     for cat in list(guild.categories):
         if cat.name in APPROVED_CATEGORIES:
             continue
-        # Keep 👑 VIP (already approved) and any user VIP room categories
         if cat.name == VIP_CATEGORY_NAME:
             continue
-        # Only delete if empty (safety check)
         if len(cat.channels) == 0:
             try:
                 await cat.delete(reason="Sabpot auto-cleanup: empty unapproved category")
@@ -1710,11 +1696,10 @@ async def _auto_create_channels():
             print(f"[SETUP] Could not create #{name}: {e}")
             return None
 
-    # Permission overwrites
     def _public_ow():
         ow = {
             guild.default_role: discord.PermissionOverwrite(read_messages=True,  send_messages=False),
-            guild.me:           discord.PermissionOverwrite(read_messages=True,  send_messages=True,  manage_channels=True),
+            guild.me:           discord.PermissionOverwrite(read_messages=True,  send_messages=True, manage_channels=True),
         }
         if admin_role: ow[admin_role] = discord.PermissionOverwrite(read_messages=True, send_messages=True)
         return ow
@@ -1734,19 +1719,18 @@ async def _auto_create_channels():
             guild.default_role: discord.PermissionOverwrite(read_messages=False),
             guild.me:           discord.PermissionOverwrite(read_messages=True,  send_messages=True, manage_channels=True),
         }
-        if admin_role:  ow[admin_role]  = discord.PermissionOverwrite(read_messages=True, send_messages=True)
-        if staff_role:  ow[staff_role]  = discord.PermissionOverwrite(read_messages=True, send_messages=True)
-        if owner_role:  ow[owner_role]  = discord.PermissionOverwrite(read_messages=True, send_messages=True)
+        if admin_role: ow[admin_role] = discord.PermissionOverwrite(read_messages=True, send_messages=True)
+        if staff_role: ow[staff_role] = discord.PermissionOverwrite(read_messages=True, send_messages=True)
+        if owner_role: ow[owner_role] = discord.PermissionOverwrite(read_messages=True, send_messages=True)
         return ow
 
     def _admin_ow():
-        """Admin + Owner only — Staff cannot see these channels."""
         ow = {
             guild.default_role: discord.PermissionOverwrite(read_messages=False),
             guild.me:           discord.PermissionOverwrite(read_messages=True,  send_messages=True, manage_channels=True),
         }
-        if admin_role:  ow[admin_role]  = discord.PermissionOverwrite(read_messages=True, send_messages=True)
-        if owner_role:  ow[owner_role]  = discord.PermissionOverwrite(read_messages=True, send_messages=True)
+        if admin_role: ow[admin_role] = discord.PermissionOverwrite(read_messages=True, send_messages=True)
+        if owner_role: ow[owner_role] = discord.PermissionOverwrite(read_messages=True, send_messages=True)
         return ow
 
     def _vouches_ow():
@@ -1766,64 +1750,63 @@ async def _auto_create_channels():
         if admin_role: ow[admin_role] = discord.PermissionOverwrite(read_messages=True, send_messages=True)
         return ow
 
-    # ── Create all categories and channels — SABFlippy layout ──
+    # ── SABFlippy layout — matches screenshot exactly ──
 
-    # RULES (top, public read-only)
-    cat_rules  = await _get_or_create_cat("RULES")
+    # RULES
+    cat_rules = await _get_or_create_cat("RULES")
     await _get_or_create_ch("📋┃rules", cat_rules, "Server rules", _public_ow())
 
-    # IMPORTANT
-    cat_imp    = await _get_or_create_cat("❗ IMPORTANT")
-    await _get_or_create_ch("📢┃announcements",     cat_imp, "Casino announcements",       _public_ow())
-    await _get_or_create_ch("📢┃bot-announcements", cat_imp, "Bot update announcements",   _public_ow())
-    await _get_or_create_ch("🎁┃giveaways",         cat_imp, "Giveaways and rain!",        _members_ow())
-    await _get_or_create_ch("✅┃are-we-legit",      cat_imp, "Proof we pay out",           _vouches_ow())
+    # ❗ IMPORTANT
+    cat_imp = await _get_or_create_cat("❗ IMPORTANT")
+    await _get_or_create_ch("📢┃announcements",     cat_imp, "Casino announcements",     _public_ow())
+    await _get_or_create_ch("📢┃bot-announcements", cat_imp, "Bot update announcements", _public_ow())
+    await _get_or_create_ch("🎁┃giveaways",         cat_imp, "Giveaways and rain!",      _members_ow())
+    await _get_or_create_ch("✅┃are-we-legit",      cat_imp, "Proof we pay out",         _vouches_ow())
 
-    # EXTRA
-    cat_extra  = await _get_or_create_cat("Extra")
-    await _get_or_create_ch("🎁┃tips",           cat_extra, "Send tips to others",              _members_ow())
-    await _get_or_create_ch("✨┃rain",            cat_extra, "Gem rain events",                 _members_ow())
-    await _get_or_create_ch("🎁┃promo-codes",    cat_extra, "Redeem promo codes here",          _members_ow())
-    await _get_or_create_ch("💜┃boost-rewards",  cat_extra, "Rewards for boosting the server",  _members_ow())
-    await _get_or_create_ch("🚨┃withdrawals",    cat_extra, "Use /withdraw to request an item", _members_ow())
+    # Extra
+    cat_extra = await _get_or_create_cat("Extra")
+    await _get_or_create_ch("🎁┃tips",          cat_extra, "Send tips to others",              _members_ow())
+    await _get_or_create_ch("✨┃rain",           cat_extra, "Gem rain events",                 _members_ow())
+    await _get_or_create_ch("🎁┃promo-codes",   cat_extra, "Redeem promo codes here",          _members_ow())
+    await _get_or_create_ch("💜┃boost-rewards", cat_extra, "Rewards for boosting the server",  _members_ow())
+    await _get_or_create_ch("🚨┃withdrawals",   cat_extra, "Use /withdraw to request a withdrawal", _members_ow())
 
-    # CHAT
-    cat_chat   = await _get_or_create_cat("Chat")
-    games_ch   = await _get_or_create_ch("💬┃general",  cat_chat, "General chat",          _members_ow())
-    await _get_or_create_ch("🖼️┃media",                  cat_chat, "Share media here",     _members_ow())
-    await _get_or_create_ch("🤝┃vouch",                  cat_chat, "Vouch for our service", _members_ow())
+    # Chat
+    cat_chat = await _get_or_create_cat("Chat")
+    games_ch = await _get_or_create_ch("💬┃general", cat_chat, "General chat",      _members_ow())
+    await _get_or_create_ch("🖼️┃media",               cat_chat, "Share media here",  _members_ow())
+    await _get_or_create_ch("🤝┃vouch",                cat_chat, "Vouch for our service", _members_ow())
 
-    # VERIFICATION
+    # 🔒 VERIFICATION
     cat_verify = await _get_or_create_cat("🔒 VERIFICATION")
     await _get_or_create_ch("✅┃verify", cat_verify, "Verify to access the server", {
         guild.default_role: discord.PermissionOverwrite(read_messages=True, send_messages=False),
         guild.me:           discord.PermissionOverwrite(read_messages=True, send_messages=True, manage_channels=True),
     })
 
-    # VIP — lounge + room placeholder (user rooms auto-created via /createviproom)
+    # 👑 VIP
     cat_vip = await _get_or_create_cat("👑 VIP")
-    await _get_or_create_ch("👑┃vip-lounge",  cat_vip, "Exclusive VIP lounge", _vip_ow())
-    await _get_or_create_ch("💎・vip-room",   cat_vip, "Private VIP room — use /createviproom to get your own", _vip_ow())
+    await _get_or_create_ch("👑┃vip-lounge", cat_vip, "Exclusive VIP lounge", _vip_ow())
+    await _get_or_create_ch("💎・vip-room",  cat_vip, "Private VIP room — use /createviproom to get your own", _vip_ow())
 
-    # LOGS (staff only)
-    cat_logs       = await _get_or_create_cat("📊 LOGS")
-    game_log_ch    = await _get_or_create_ch("📊┃game-log",         cat_logs, "All game results",          _admin_ow())
-    finance_log_ch = await _get_or_create_ch("💰┃finance-log",      cat_logs, "Deposits & withdrawals",    _admin_ow())
-    tip_log_ch     = await _get_or_create_ch("💸┃tip-log",          cat_logs, "Tip transactions",          _admin_ow())
-    invite_log_ch  = await _get_or_create_ch("📨┃invite-log",       cat_logs, "Invite reward logs",        _admin_ow())
-    verify_log_ch  = await _get_or_create_ch("✅┃verify-log",       cat_logs, "Verification logs",         _admin_ow())
-    vouches_ch     = await _get_or_create_ch("✅┃are-we-legit-log",  cat_logs, "Public vouch feed",         _admin_ow())
-    withdraw_log_ch= await _get_or_create_ch("🚨┃withdraws",        cat_logs, "All withdrawal tickets",    _staff_ow())
+    # 📊 LOGS
+    cat_logs        = await _get_or_create_cat("📊 LOGS")
+    game_log_ch     = await _get_or_create_ch("📊┃game-log",         cat_logs, "All game results",       _admin_ow())
+    finance_log_ch  = await _get_or_create_ch("💰┃finance-log",      cat_logs, "Deposits & withdrawals", _admin_ow())
+    tip_log_ch      = await _get_or_create_ch("💸┃tip-log",          cat_logs, "Tip transactions",       _admin_ow())
+    invite_log_ch   = await _get_or_create_ch("📨┃invite-log",       cat_logs, "Invite reward logs",     _admin_ow())
+    verify_log_ch   = await _get_or_create_ch("✅┃verify-log",       cat_logs, "Verification logs",      _admin_ow())
+    vouches_ch      = await _get_or_create_ch("✅┃are-we-legit-log",  cat_logs, "Public vouch feed",      _admin_ow())
+    withdraw_log_ch = await _get_or_create_ch("🚨┃withdraws",        cat_logs, "All withdrawal tickets", _staff_ow())
 
-    # DEPOSITS (staff-visible — deposit- ticket channels auto-created here)
-    cat_deposits   = await _get_or_create_cat("Deposits")
-    await _get_or_create_ch("💳┃deposits",       cat_deposits, "Use /deposit to open a ticket", _members_ow())
+    # Deposits — ticket channels (deposit-XXXX) live here, NEVER deleted
+    cat_deposits = await _get_or_create_cat("Deposits")
+    await _get_or_create_ch("💳┃deposits", cat_deposits, "Use /deposit to open a ticket", _members_ow())
 
-    # WITHDRAWS (staff-visible — withdraw- ticket channels auto-created here)
-    cat_withdraws  = await _get_or_create_cat("Withdraws")
+    # Withdraws — ticket channels (wd-XXXX) live here, NEVER deleted
+    await _get_or_create_cat("Withdraws")
 
-    # Dummy vars for compat (no separate case-battles category in this layout)
-    cb_ch = games_ch
+    cb_ch = games_ch  # case battles use general
 
     # ── Save channel IDs to DB and globals ──
     global LOG_CHANNEL_ID, FINANCE_LOG_ID, INVITE_LOG_ID, TIP_LOG_ID
@@ -1837,15 +1820,15 @@ async def _auto_create_channels():
     if vouches_ch:     VOUCHES_CHANNEL_ID     = vouches_ch.id
 
     settings = {}
-    if game_log_ch:       settings["channel_game_log"]     = str(game_log_ch.id)
-    if finance_log_ch:    settings["channel_finance_log"]  = str(finance_log_ch.id)
-    if tip_log_ch:        settings["channel_tip_log"]      = str(tip_log_ch.id)
-    if invite_log_ch:     settings["channel_invite_log"]   = str(invite_log_ch.id)
-    if verify_log_ch:     settings["channel_verify_log"]   = str(verify_log_ch.id)
-    if cb_ch:             settings["channel_case_battles"] = str(cb_ch.id)
-    if vouches_ch:        settings["channel_vouches"]      = str(vouches_ch.id)
-    if games_ch:          settings["channel_games"]        = str(games_ch.id)
-    if withdraw_log_ch:   settings["channel_withdraw_log"] = str(withdraw_log_ch.id)
+    if game_log_ch:     settings["channel_game_log"]     = str(game_log_ch.id)
+    if finance_log_ch:  settings["channel_finance_log"]  = str(finance_log_ch.id)
+    if tip_log_ch:      settings["channel_tip_log"]      = str(tip_log_ch.id)
+    if invite_log_ch:   settings["channel_invite_log"]   = str(invite_log_ch.id)
+    if verify_log_ch:   settings["channel_verify_log"]   = str(verify_log_ch.id)
+    if cb_ch:           settings["channel_case_battles"] = str(cb_ch.id)
+    if vouches_ch:      settings["channel_vouches"]      = str(vouches_ch.id)
+    if games_ch:        settings["channel_games"]        = str(games_ch.id)
+    if withdraw_log_ch: settings["channel_withdraw_log"] = str(withdraw_log_ch.id)
 
     if settings:
         conn = await get_conn()
@@ -1862,7 +1845,6 @@ async def _auto_create_channels():
             await release_conn(conn)
 
     print(f"[SETUP] Auto-channel setup complete")
-
 
 async def _migrate_add_deposited_column():
     """One-time migration: add missing columns and tables to existing DBs."""
@@ -4122,11 +4104,6 @@ async def cmd_progressivecoinflip(interaction: discord.Interaction, bet: str):
     if wait > 0:
         await interaction.response.send_message(f"⏳ Wait **{wait:.1f}s** before starting another game.", ephemeral=True)
         return
-    if not _start_game_session(interaction.user.id):
-        await interaction.response.send_message(
-            "⏳ You already have an active game running! Finish it before starting a new one.",
-            ephemeral=True)
-        return
     if is_game_locked("progressivecoinflip", interaction.user):
         await interaction.response.send_message(
             "🔒 **Progressivecoinflip** is currently locked to staff only.", ephemeral=True
@@ -4156,6 +4133,9 @@ async def cmd_progressivecoinflip(interaction: discord.Interaction, bet: str):
 
     pf   = pf_new_game()
     pf["game_name"] = "Progressive Coinflip"
+    if not _start_game_session(interaction.user.id):
+        await interaction.response.send_message("⏳ You already have an active game running! Finish it before starting a new one.", ephemeral=True)
+        return
     view = ProgressiveCoinflipView(interaction.user, amt)
     view._pf_game_id = pf["game_id"]
     embed = view.game_embed()
@@ -4407,11 +4387,6 @@ async def cmd_progressivedice(interaction: discord.Interaction, bet: str):
     if wait > 0:
         await interaction.response.send_message(f"⏳ Wait **{wait:.1f}s** before starting another game.", ephemeral=True)
         return
-    if not _start_game_session(interaction.user.id):
-        await interaction.response.send_message(
-            "⏳ You already have an active game running! Finish it before starting a new one.",
-            ephemeral=True)
-        return
     if is_game_locked("progressivedice", interaction.user):
         await interaction.response.send_message(
             "🔒 **Progressivedice** is currently locked to staff only.", ephemeral=True
@@ -4441,6 +4416,9 @@ async def cmd_progressivedice(interaction: discord.Interaction, bet: str):
 
     pf   = pf_new_game()
     pf["game_name"] = "Progressive Dice"
+    if not _start_game_session(interaction.user.id):
+        await interaction.response.send_message("⏳ You already have an active game running! Finish it before starting a new one.", ephemeral=True)
+        return
     view = ProgressiveDiceView(interaction.user, amt)
     view._pf_game_id = pf["game_id"]
     embed = view.game_embed()
@@ -4459,11 +4437,6 @@ async def cmd_coinflip(interaction: discord.Interaction, bet: str, side: str):
     wait = check_cooldown("coinflip", interaction.user.id)
     if wait > 0:
         await interaction.response.send_message(f"⏳ Cooldown — wait **{wait:.1f}s** before playing again.", ephemeral=True)
-        return
-    if not _start_game_session(interaction.user.id):
-        await interaction.response.send_message(
-            "⏳ You already have an active game running! Finish it before starting a new one.",
-            ephemeral=True)
         return
     if is_game_locked("coinflip", interaction.user):
         await interaction.response.send_message(
@@ -4497,6 +4470,9 @@ async def cmd_coinflip(interaction: discord.Interaction, bet: str, side: str):
 
     pf    = pf_new_game()
     pf["game_name"] = "Coinflip"
+    if not _start_game_session(interaction.user.id):
+        await interaction.response.send_message("⏳ You already have an active game running! Finish it before starting a new one.", ephemeral=True)
+        return
     view  = CoinflipView(interaction.user, amt, side)
     view.creator_paid = True  # already deducted upfront
     view._pf_game_id  = pf["game_id"]
@@ -4758,11 +4734,6 @@ async def cmd_dice(interaction: discord.Interaction, bet: str):
     if wait > 0:
         await interaction.response.send_message(f"⏳ Cooldown — wait **{wait:.1f}s** before playing again.", ephemeral=True)
         return
-    if not _start_game_session(interaction.user.id):
-        await interaction.response.send_message(
-            "⏳ You already have an active game running! Finish it before starting a new one.",
-            ephemeral=True)
-        return
     if is_game_locked("dice", interaction.user):
         await interaction.response.send_message(
             "🔒 **Dice** is currently locked to staff only.", ephemeral=True
@@ -4793,6 +4764,9 @@ async def cmd_dice(interaction: discord.Interaction, bet: str):
         finally:
             await release_conn(conn)
 
+    if not _start_game_session(interaction.user.id):
+        await interaction.response.send_message("⏳ You already have an active game running! Finish it before starting a new one.", ephemeral=True)
+        return
     view  = DiceView(interaction.user, amt)
     embed = discord.Embed(
         title="🎲  DICE ROLL",
@@ -4996,11 +4970,6 @@ async def cmd_roulette(interaction: discord.Interaction, bet: str):
     if wait > 0:
         await interaction.response.send_message(f"⏳ Cooldown — wait **{wait:.1f}s** before playing again.", ephemeral=True)
         return
-    if not _start_game_session(interaction.user.id):
-        await interaction.response.send_message(
-            "⏳ You already have an active game running! Finish it before starting a new one.",
-            ephemeral=True)
-        return
     if is_game_locked("roulette", interaction.user):
         await interaction.response.send_message(
             "🔒 **Roulette** is currently locked to staff only.", ephemeral=True
@@ -5031,6 +5000,9 @@ async def cmd_roulette(interaction: discord.Interaction, bet: str):
         finally:
             await release_conn(conn)
 
+    if not _start_game_session(interaction.user.id):
+        await interaction.response.send_message("⏳ You already have an active game running! Finish it before starting a new one.", ephemeral=True)
+        return
     view  = RouletteView(interaction.user, amt)
     view.used = False  # will be set True on spin
     embed = discord.Embed(
@@ -5336,11 +5308,6 @@ async def cmd_baccarat(interaction: discord.Interaction, bet: str):
     if wait > 0:
         await interaction.response.send_message(f"⏳ Cooldown — wait **{wait:.1f}s** before playing again.", ephemeral=True)
         return
-    if not _start_game_session(interaction.user.id):
-        await interaction.response.send_message(
-            "⏳ You already have an active game running! Finish it before starting a new one.",
-            ephemeral=True)
-        return
     if is_game_locked("baccarat", interaction.user):
         await interaction.response.send_message(
             "🔒 **Baccarat** is currently locked to staff only.", ephemeral=True
@@ -5371,6 +5338,9 @@ async def cmd_baccarat(interaction: discord.Interaction, bet: str):
         finally:
             await release_conn(conn)
 
+    if not _start_game_session(interaction.user.id):
+        await interaction.response.send_message("⏳ You already have an active game running! Finish it before starting a new one.", ephemeral=True)
+        return
     view  = BaccaratView(interaction.user, amt)
     embed = discord.Embed(
         color=C_GOLD,
@@ -5700,11 +5670,6 @@ async def cmd_blackjack(interaction: discord.Interaction, bet: str):
     if wait > 0:
         await interaction.response.send_message(f"⏳ Cooldown — wait **{wait:.1f}s** before playing again.", ephemeral=True)
         return
-    if not _start_game_session(interaction.user.id):
-        await interaction.response.send_message(
-            "⏳ You already have an active game running! Finish it before starting a new one.",
-            ephemeral=True)
-        return
     if is_game_locked("blackjack", interaction.user):
         await interaction.response.send_message(
             "🔒 **Blackjack** is currently locked to staff only.", ephemeral=True
@@ -5738,6 +5703,9 @@ async def cmd_blackjack(interaction: discord.Interaction, bet: str):
     deck = build_deck()
     ph   = [deck.pop(), deck.pop()]
     dh   = [deck.pop(), deck.pop()]
+    if not _start_game_session(interaction.user.id):
+        await interaction.response.send_message("⏳ You already have an active game running! Finish it before starting a new one.", ephemeral=True)
+        return
     view = BlackjackView(interaction.user, amt, deck, ph, dh)
     view._bet_deducted = True  # already deducted upfront
 
@@ -6076,11 +6044,6 @@ async def cmd_blackjackdice(interaction: discord.Interaction, bet: str):
         await interaction.response.send_message(
             f"⏳ Wait **{wait:.1f}s** before playing again.", ephemeral=True)
         return
-    if not _start_game_session(interaction.user.id):
-        await interaction.response.send_message(
-            "⏳ You already have an active game running! Finish it before starting a new one.",
-            ephemeral=True)
-        return
     if is_game_locked("blackjackdice", interaction.user):
         await interaction.response.send_message(
             "🔒 **Blackjackdice** is currently locked to staff only.", ephemeral=True
@@ -6112,6 +6075,9 @@ async def cmd_blackjackdice(interaction: discord.Interaction, bet: str):
 
     player_dice = [bjd_roll(), bjd_roll()]
     dealer_dice = [bjd_roll(), bjd_roll()]
+    if not _start_game_session(interaction.user.id):
+        await interaction.response.send_message("⏳ You already have an active game running! Finish it before starting a new one.", ephemeral=True)
+        return
     view = BlackjackDiceView(interaction.user, amt, player_dice, dealer_dice)
     view._bet_deducted = True  # already deducted upfront
     await interaction.response.send_message(embed=view.game_embed(), view=view)
@@ -6400,11 +6366,6 @@ async def cmd_war(interaction: discord.Interaction, bet: str):
         await interaction.response.send_message(
             f"⏳ Cooldown — wait **{wait:.1f}s** before playing again.", ephemeral=True)
         return
-    if not _start_game_session(interaction.user.id):
-        await interaction.response.send_message(
-            "⏳ You already have an active game running! Finish it before starting a new one.",
-            ephemeral=True)
-        return
     if is_game_locked("war", interaction.user):
         await interaction.response.send_message(
             "🔒 **War** is currently locked to staff only.", ephemeral=True
@@ -6436,6 +6397,9 @@ async def cmd_war(interaction: discord.Interaction, bet: str):
         finally:
             await release_conn(conn)
 
+    if not _start_game_session(interaction.user.id):
+        await interaction.response.send_message("⏳ You already have an active game running! Finish it before starting a new one.", ephemeral=True)
+        return
     view = WarView(interaction.user, amt)
     description = (
         f"💰 **Bet** • {format_amount(amt)} 💠\
@@ -6888,11 +6852,6 @@ async def cmd_hilo(interaction: discord.Interaction, bet: str):
         await interaction.response.send_message(
             f"⏳ Cooldown — wait **{wait:.1f}s** before playing again.", ephemeral=True)
         return
-    if not _start_game_session(interaction.user.id):
-        await interaction.response.send_message(
-            "⏳ You already have an active game running! Finish it before starting a new one.",
-            ephemeral=True)
-        return
     if is_game_locked("hilo", interaction.user):
         await interaction.response.send_message(
             "🔒 **Hilo** is currently locked to staff only.", ephemeral=True
@@ -6925,6 +6884,9 @@ async def cmd_hilo(interaction: discord.Interaction, bet: str):
             await release_conn(conn)
 
     first_card = hilo_card()
+    if not _start_game_session(interaction.user.id):
+        await interaction.response.send_message("⏳ You already have an active game running! Finish it before starting a new one.", ephemeral=True)
+        return
     view       = HiloView(interaction.user, amt, first_card)
     view.bet_deducted = True
 
@@ -7292,11 +7254,6 @@ async def cmd_towers(interaction: discord.Interaction, bet: str):
         await interaction.response.send_message(
             f"⏳ Cooldown — wait **{wait:.1f}s** before playing again.", ephemeral=True)
         return
-    if not _start_game_session(interaction.user.id):
-        await interaction.response.send_message(
-            "⏳ You already have an active game running! Finish it before starting a new one.",
-            ephemeral=True)
-        return
     if is_game_locked("towers", interaction.user):
         await interaction.response.send_message(
             "🔒 **Towers** is currently locked to staff only.", ephemeral=True
@@ -7329,6 +7286,9 @@ async def cmd_towers(interaction: discord.Interaction, bet: str):
             await release_conn(conn)
 
     tower = generate_tower()
+    if not _start_game_session(interaction.user.id):
+        await interaction.response.send_message("⏳ You already have an active game running! Finish it before starting a new one.", ephemeral=True)
+        return
     view  = TowersView(interaction.user, amt, tower)
     view.bet_deducted = True
     await interaction.response.send_message(embed=view.game_embed(), view=view)
@@ -7744,7 +7704,7 @@ class RPSView(BaseGameView):
 
 # ╔══════════════════════════════════════════════════════════════╗
 # ║                    SABPOT  —  PART 2 OF 2                    ║
-# ║  Paste this BELOW Part 1 in the same file.                   ║
+# ║  Paste this DIRECTLY below Part 1 in the same file.          ║
 # ╚══════════════════════════════════════════════════════════════╝
 
 @bot.tree.command(name="rps", description="Play Rock Paper Scissors — chain wins to multiply your bet!")
@@ -7754,11 +7714,6 @@ async def cmd_rps(interaction: discord.Interaction, bet: str):
     if wait > 0:
         await interaction.response.send_message(
             f"⏳ Cooldown — wait **{wait:.1f}s** before playing again.", ephemeral=True)
-        return
-    if not _start_game_session(interaction.user.id):
-        await interaction.response.send_message(
-            "⏳ You already have an active game running! Finish it before starting a new one.",
-            ephemeral=True)
         return
     if is_game_locked("rps", interaction.user):
         await interaction.response.send_message(
@@ -7787,6 +7742,9 @@ async def cmd_rps(interaction: discord.Interaction, bet: str):
                 return
         finally:
             await release_conn(conn)
+    if not _start_game_session(interaction.user.id):
+        await interaction.response.send_message("⏳ You already have an active game running! Finish it before starting a new one.", ephemeral=True)
+        return
     view = RPSView(interaction.user, amt)
     view.bet_deducted = True
     await interaction.response.send_message(embed=view.game_embed(), view=view)
@@ -8137,11 +8095,6 @@ async def cmd_mines(interaction: discord.Interaction, bet: str, mines: int):
     if wait > 0:
         await interaction.response.send_message(f"⏳ Wait **{wait:.1f}s**.", ephemeral=True)
         return
-    if not _start_game_session(interaction.user.id):
-        await interaction.response.send_message(
-            "⏳ You already have an active game running! Finish it before starting a new one.",
-            ephemeral=True)
-        return
     if is_game_locked("mines", interaction.user):
         await interaction.response.send_message(
             "🔒 **Mines** is currently locked to staff only.", ephemeral=True
@@ -8172,6 +8125,9 @@ async def cmd_mines(interaction: discord.Interaction, bet: str, mines: int):
                 return
         finally:
             await release_conn(conn)
+    if not _start_game_session(interaction.user.id):
+        await interaction.response.send_message("⏳ You already have an active game running! Finish it before starting a new one.", ephemeral=True)
+        return
     view = MinesView(interaction.user, amt, mines)
     view.bet_deducted = True
     await interaction.response.send_message(embed=view.game_embed(), view=view)
@@ -8524,11 +8480,6 @@ async def cmd_scratch(interaction: discord.Interaction, bet: str):
         await interaction.response.send_message(
             f"⏳ Wait **{wait:.1f}s** before playing again.", ephemeral=True)
         return
-    if not _start_game_session(interaction.user.id):
-        await interaction.response.send_message(
-            "⏳ You already have an active game running! Finish it before starting a new one.",
-            ephemeral=True)
-        return
     if is_game_locked("scratch", interaction.user):
         await interaction.response.send_message(
             "🔒 **Scratch** is currently locked to staff only.", ephemeral=True
@@ -8557,6 +8508,9 @@ async def cmd_scratch(interaction: discord.Interaction, bet: str):
                 return
         finally:
             await release_conn(conn)
+    if not _start_game_session(interaction.user.id):
+        await interaction.response.send_message("⏳ You already have an active game running! Finish it before starting a new one.", ephemeral=True)
+        return
     view = ScratchView(interaction.user, amt)
     view.bet_deducted = True
     await interaction.response.send_message(embed=view.game_embed(), view=view)
@@ -8675,11 +8629,6 @@ async def cmd_horserace(interaction: discord.Interaction, bet: str, horse: int):
         await interaction.response.send_message(
             f"⏳ Wait **{wait:.1f}s** before playing again.", ephemeral=True)
         return
-    if not _start_game_session(interaction.user.id):
-        await interaction.response.send_message(
-            "⏳ You already have an active game running! Finish it before starting a new one.",
-            ephemeral=True)
-        return
     if is_game_locked("horserace", interaction.user):
         await interaction.response.send_message(
             "🔒 **Horse Race** is currently locked to staff only.", ephemeral=True
@@ -8733,6 +8682,9 @@ async def cmd_horserace(interaction: discord.Interaction, bet: str, horse: int):
     finished  = []  # order of finish
 
     # Send initial embed
+    if not _start_game_session(interaction.user.id):
+        await interaction.response.send_message("⏳ You already have an active game running! Finish it before starting a new one.", ephemeral=True)
+        return
     await interaction.response.send_message(
         embed=hr_race_embed(positions, amt, chosen))
     msg = await interaction.original_response()
@@ -8836,6 +8788,7 @@ async def cmd_horserace(interaction: discord.Interaction, bet: str, horse: int):
     log_e.add_field(name="Outcome", value="✅ WIN" if won else "❌ LOSS",         inline=True)
     log_e.set_footer(text=now_ts())
     await send_log(log_e)
+    _end_game_session(interaction.user.id)
 
 
 # ═══════════════════════════════════════════════════════════
@@ -9385,11 +9338,6 @@ class SlotsView(BaseGameView):
             if itx.user.id != self.creator.id:
                 await itx.response.send_message("❌ This isn't your game.", ephemeral=True)
                 return
-            # Re-register session for the new spin
-            if not _start_game_session(itx.user.id):
-                await itx.response.send_message(
-                    "⏳ You already have an active game running!", ephemeral=True)
-                return
             # Reset and re-arm
             self._spinning = False
             self.clear_items()
@@ -9443,11 +9391,6 @@ async def cmd_slots(interaction: discord.Interaction, amount: str):
         await interaction.response.send_message(
             f"⏳ Cooldown — wait **{wait:.1f}s** before playing again.", ephemeral=True)
         return
-    if not _start_game_session(interaction.user.id):
-        await interaction.response.send_message(
-            "⏳ You already have an active game running! Finish it before starting a new one.",
-            ephemeral=True)
-        return
     if is_game_locked("slots", interaction.user):
         await interaction.response.send_message(
             "🔒 **Slots** is currently locked to staff only.", ephemeral=True
@@ -9474,6 +9417,9 @@ async def cmd_slots(interaction: discord.Interaction, amount: str):
         await interaction.response.send_message("❌ Insufficient balance.", ephemeral=True)
         return
 
+    if not _start_game_session(interaction.user.id):
+        await interaction.response.send_message("⏳ You already have an active game running! Finish it before starting a new one.", ephemeral=True)
+        return
     view = SlotsView(creator=interaction.user, bet=amt)
     await interaction.response.send_message(embed=view._ready_embed(), view=view)
     view._original_message = await interaction.original_response()
@@ -9485,11 +9431,6 @@ async def cmd_pumpballoon(interaction: discord.Interaction, bet: str):
     if wait > 0:
         await interaction.response.send_message(
             f"⏳ Wait **{wait:.1f}s** before playing again.", ephemeral=True)
-        return
-    if not _start_game_session(interaction.user.id):
-        await interaction.response.send_message(
-            "⏳ You already have an active game running! Finish it before starting a new one.",
-            ephemeral=True)
         return
     if is_game_locked("pumpballoon", interaction.user):
         await interaction.response.send_message(
@@ -9518,6 +9459,9 @@ async def cmd_pumpballoon(interaction: discord.Interaction, bet: str):
                 return
         finally:
             await release_conn(conn)
+    if not _start_game_session(interaction.user.id):
+        await interaction.response.send_message("⏳ You already have an active game running! Finish it before starting a new one.", ephemeral=True)
+        return
     view = BalloonView(interaction.user, amt)
     view.bet_deducted = True
     await interaction.response.send_message(embed=view.game_embed(), view=view)
@@ -9802,11 +9746,6 @@ async def cmd_colordice(interaction: discord.Interaction, bet: str):
         await interaction.response.send_message(
             f"⏳ Wait **{wait:.1f}s** before playing again.", ephemeral=True)
         return
-    if not _start_game_session(interaction.user.id):
-        await interaction.response.send_message(
-            "⏳ You already have an active game running! Finish it before starting a new one.",
-            ephemeral=True)
-        return
     if is_game_locked("colordice", interaction.user):
         await interaction.response.send_message(
             "🔒 **Colordice** is currently locked to staff only.", ephemeral=True
@@ -9835,6 +9774,9 @@ async def cmd_colordice(interaction: discord.Interaction, bet: str):
                 return
         finally:
             await release_conn(conn)
+    if not _start_game_session(interaction.user.id):
+        await interaction.response.send_message("⏳ You already have an active game running! Finish it before starting a new one.", ephemeral=True)
+        return
     view = ColorDiceView(interaction.user, amt)
     view.used = True  # bet already deducted; mark to prevent double deduction
     await interaction.response.send_message(embed=view.game_embed() if False else cd_game_embed(amt), view=view)
@@ -9950,11 +9892,6 @@ async def cmd_upgrader(interaction: discord.Interaction, bet: str, multiplier: f
         await interaction.response.send_message(
             f"⏳ Wait **{wait:.1f}s** before playing again.", ephemeral=True)
         return
-    if not _start_game_session(interaction.user.id):
-        await interaction.response.send_message(
-            "⏳ You already have an active game running! Finish it before starting a new one.",
-            ephemeral=True)
-        return
     if is_game_locked("upgrader", interaction.user):
         await interaction.response.send_message(
             "🔒 **Upgrader** is currently locked to staff only.", ephemeral=True)
@@ -10020,6 +9957,9 @@ async def cmd_upgrader(interaction: discord.Interaction, bet: str, multiplier: f
         # Land somewhere in the red zone [win_boundary, 1.0)
         final_pos = random.uniform(win_boundary, 0.999)
 
+    if not _start_game_session(interaction.user.id):
+        await interaction.response.send_message("⏳ You already have an active game running! Finish it before starting a new one.", ephemeral=True)
+        return
     await interaction.response.send_message(
         embed=upgrader_embed(amt, multiplier, outcome="pending", arrow_pos=0.0))
     msg = await interaction.original_response()
@@ -10081,6 +10021,7 @@ async def cmd_upgrader(interaction: discord.Interaction, bet: str, multiplier: f
     log_e.add_field(name="Outcome",     value="✅ WIN" if won else "❌ LOSS",  inline=True)
     log_e.set_footer(text=now_ts())
     await send_log(log_e)
+    _end_game_session(interaction.user.id)
 
 # ═══════════════════════════════════════════════════════════
 # VERIFY SYSTEM
@@ -15665,15 +15606,13 @@ async def _cb_timeout(battle_id: int, message, view: CaseBattleLobbyView):
 
 @bot.tree.command(name="createcasebattle", description="Create a case battle and challenge others.")
 async def cmd_createcasebattle(interaction: discord.Interaction):
-    if not _start_game_session(interaction.user.id):
-        await interaction.response.send_message(
-            "⏳ You already have an active game running! Finish it before starting a new one.",
-            ephemeral=True)
-        return
     if is_game_locked("createcasebattle", interaction.user):
         await interaction.response.send_message(
             "🔒 **Case Battle** is currently locked to staff only.", ephemeral=True
         )
+        return
+    if not _start_game_session(interaction.user.id):
+        await interaction.response.send_message("⏳ You already have an active game running! Finish it before starting a new one.", ephemeral=True)
         return
     setup_view = CaseBattleSetupView(interaction.user)
     await interaction.response.send_message(
