@@ -34,17 +34,26 @@ except ImportError:
 # ║    GUILD_ID     — Your Discord server ID                     ║
 # ║                                                              ║
 # ║  OPTIONAL env variables (GIFs/logo — or paste URLs below):  ║
-# ║    LOGO_URL              — Sabpot purple logo URL            ║
-# ║    COINFLIP_HEADS_GIF    — Heads result GIF URL              ║
-# ║    COINFLIP_TAILS_GIF    — Tails result GIF URL              ║
-# ║    COINFLIP_SPINNING_GIF — Spinning coin GIF URL             ║
+# ║    LOGO_URL              — Bot logo URL (shown in embeds)    ║
+# ║    COINFLIP_HEADS_GIF    — Heads result GIF/image URL        ║
+# ║    COINFLIP_TAILS_GIF    — Tails result GIF/image URL        ║
+# ║    COINFLIP_SPINNING_GIF — Spinning animation GIF URL        ║
 # ║                                                              ║
 # ║  HOW TO GET GIF URLS:                                        ║
 # ║    Upload the GIF to any Discord channel → send it →         ║
-# ║    right-click image → Copy Link → paste the URL below       ║
+# ║    right-click image → Copy Link → paste the URL here        ║
+# ║    OR upload to imgur.com for permanent links                ║
 # ║                                                              ║
-# ║  All channels/roles auto-create on bot startup.             ║
-# ║  No /setup command needed. Just invite and run!             ║
+# ║  LOG CHANNELS — run these slash commands after bot starts:   ║
+# ║    /setgamelog    #channel  — game results                   ║
+# ║    /setfinancelog #channel  — deposits & withdrawals         ║
+# ║    /setinvitelog  #channel  — invite rewards                 ║
+# ║    /setrewardlog  #channel  — rain/promo/daily/boost         ║
+# ║    /settiplog     #channel  — admin tip log                  ║
+# ║    /settippublic  #channel  — public tip announcements       ║
+# ║                                                              ║
+# ║  All roles auto-create on bot startup.                       ║
+# ║  No /setup command needed. Just invite and run!              ║
 # ╚══════════════════════════════════════════════════════════════╝
 
 # ═══════════════════════════════════════════════════════════
@@ -57,6 +66,7 @@ DATABASE_URL         = os.getenv("DATABASE_URL", "")
 LOG_CHANNEL_ID       = 0   # game-log
 FINANCE_LOG_ID       = 0   # finance-log
 INVITE_LOG_ID        = 0   # invite-log
+REWARD_LOG_ID        = 0   # rewards-log (rain, promo, daily, boost — set via /setrewardlog)
 TIP_LOG_ID             = 0   # tip-log (admin only)
 TIP_PUBLIC_LOG_ID      = 0   # tipping  (public in Extra)
 VOUCHES_CHANNEL_ID   = 0   # vouches (public activity feed)
@@ -65,7 +75,7 @@ CASE_BATTLE_CHANNEL_ID = 0  # case-battles channel (same, set by auto-setup)
 
 async def _load_channel_ids():
     """Load channel IDs saved by /setup from the DB into globals."""
-    global LOG_CHANNEL_ID, FINANCE_LOG_ID, INVITE_LOG_ID, TIP_LOG_ID, TIP_PUBLIC_LOG_ID
+    global LOG_CHANNEL_ID, FINANCE_LOG_ID, INVITE_LOG_ID, REWARD_LOG_ID, TIP_LOG_ID, TIP_PUBLIC_LOG_ID
     global CASE_BATTLE_LOG_ID, VOUCHES_CHANNEL_ID, CASE_BATTLE_CHANNEL_ID
     try:
         conn = await get_conn()
@@ -77,6 +87,7 @@ async def _load_channel_ids():
                 elif r["key"] == "channel_vouches":        VOUCHES_CHANNEL_ID = val
                 elif r["key"] == "channel_finance_log":   FINANCE_LOG_ID     = val
                 elif r["key"] == "channel_invite_log":    INVITE_LOG_ID      = val
+                elif r["key"] == "channel_reward_log":    REWARD_LOG_ID      = val
                 elif r["key"] == "channel_tip_log":       TIP_LOG_ID         = val
                 elif r["key"] == "channel_tip_public":    TIP_PUBLIC_LOG_ID  = val
                 elif r["key"] == "channel_case_battles":
@@ -340,14 +351,14 @@ def result_desc(won: bool, is_push: bool, bet: int, payout: int) -> str:
         net_txt = "> `±0`  bet returned"
     elif won:
         badge   = "🟢  **WIN**"
-        net_txt = f"> `+{format_amount(net)}`  profit"
+        net_txt = f"> `+{format_amount(net)}` 💎  profit"
     else:
         badge   = "🔴  **LOSS**"
-        net_txt = f"> `-{format_amount(bet)}`  lost"
+        net_txt = f"> `-{format_amount(bet)}` 💎  lost"
     return (
         f"{badge}\n"
         f"{net_txt}\n"
-        f"> Bet **{format_amount(bet)}**  ·  Returned **{format_amount(payout)}**"
+        f"> Bet **{format_amount(bet)}** 💎  ·  Returned **{format_amount(payout)}** 💎"
     )
 
 
@@ -1541,7 +1552,6 @@ async def on_ready():
     asyncio.create_task(_snapshot_all_members())
     asyncio.create_task(_daily_dm_loop())
     asyncio.create_task(_auto_create_roles())
-    asyncio.create_task(_auto_create_channels())
     asyncio.create_task(channel_cleanup_loop())
 
 async def _auto_create_roles():
@@ -1579,272 +1589,41 @@ async def _auto_create_roles():
     else:
         print("[ROLES] All required roles already exist")
 
+    # ── Ensure bot role sits above all management roles ──
+    await _enforce_bot_role_position(guild)
 
-async def _auto_create_channels():
-    """Auto-create all channels/categories and DELETE any that aren't in the approved list."""
-    await asyncio.sleep(5)
-    guild = bot.get_guild(GUILD_ID)
+async def _enforce_bot_role_position(guild: discord.Guild):
+    """Ensure the bot's top role is positioned above all management/staff roles."""
     if not guild:
         return
-
-    APPROVED_CHANNELS = {
-        "📋┃rules",
-        "📢┃announcements",
-        "📢┃bot-announcements",
-        "🎁┃giveaways",
-        "✅┃are-we-legit",
-        "🎁┃tips",
-        "✨┃rain",
-        "🎁┃promo-codes",
-        "💜┃boost-rewards",
-        "🚨┃withdrawals",
-        "💬┃general",
-        "🖼️┃media",
-        "🤝┃vouch",
-        "✅┃verify",
-        "👑┃vip-lounge",
-        "💎・vip-room",
-        "💳┃deposits",
-        "📊┃game-log",
-        "💰┃finance-log",
-        "💸┃tip-log",
-        "📨┃invite-log",
-        "✅┃verify-log",
-        "✅┃are-we-legit-log",
-        "🚨┃withdraws",
-    }
-
-    APPROVED_CATEGORIES = {
-        "RULES",
-        "❗ IMPORTANT",
-        "Extra",
-        "Chat",
-        "🔒 VERIFICATION",
-        "👑 VIP",
-        "Deposits",
-        "Withdraws",
-        "📊 LOGS",
-    }
-
-    def get_role(name):
-        return discord.utils.get(guild.roles, name=name)
-
-    owner_role    = get_role(OWNER_ROLE_NAME)
-    admin_role    = get_role(ADMIN_ROLE_NAME)
-    staff_role    = get_role(STAFF_ROLE_NAME)
-    vip_role      = get_role(VIP_ROLE_NAME)
-    verified_role = get_role(VERIFIED_ROLE_NAME)
-    member_role   = get_role(MEMBER_ROLE_NAME)
-
-    # DELETE unapproved channels — but NEVER delete tickets
-    for ch in list(guild.text_channels):
-        if ch.name in APPROVED_CHANNELS:
-            continue
-        if ch.name.startswith("💎・") and ch.name != "💎・vip-room":
-            continue
-        if ch.name.lower().startswith("wd-"):
-            continue
-        if ch.name.lower().startswith("deposit-"):
-            continue
-        if ch.name.lower().startswith("ticket-"):
-            continue
+    bot_member = guild.me
+    if not bot_member:
+        return
+    management_role_names = {BOT_ROLE_NAME, OWNER_ROLE_NAME, ADMIN_ROLE_NAME, STAFF_ROLE_NAME, VIP_ROLE_NAME}
+    management_roles = [r for r in guild.roles if r.name in management_role_names and r != bot_member.top_role]
+    if not management_roles:
+        return
+    highest_mgmt = max(management_roles, key=lambda r: r.position)
+    if bot_member.top_role.position <= highest_mgmt.position:
         try:
-            await ch.delete(reason="Sabpot auto-cleanup: channel not in approved layout")
-            print(f"[SETUP] Deleted unapproved channel: #{ch.name}")
+            target_pos = highest_mgmt.position + 1
+            # Cap at one below the bot's own Discord-assigned role
+            max_pos = bot_member.top_role.position
+            if target_pos > max_pos:
+                target_pos = max_pos
+            bot_role = discord.utils.get(guild.roles, name=BOT_ROLE_NAME)
+            if bot_role and bot_role.position < target_pos:
+                await bot_role.edit(position=target_pos, reason="Auto: keeping bot role above management roles")
+                print(f"[ROLES] Repositioned {BOT_ROLE_NAME} to position {target_pos}")
         except Exception as e:
-            print(f"[SETUP] Could not delete #{ch.name}: {e}")
+            print(f"[ROLES] Could not reposition bot role: {e}")
 
-    # DELETE empty unapproved categories
-    for cat in list(guild.categories):
-        if cat.name in APPROVED_CATEGORIES:
-            continue
-        if cat.name == VIP_CATEGORY_NAME:
-            continue
-        if len(cat.channels) == 0:
-            try:
-                await cat.delete(reason="Sabpot auto-cleanup: empty unapproved category")
-                print(f"[SETUP] Deleted empty unapproved category: {cat.name}")
-            except Exception as e:
-                print(f"[SETUP] Could not delete category {cat.name}: {e}")
-        else:
-            print(f"[SETUP] Skipping non-empty unapproved category: {cat.name}")
 
-    async def _get_or_create_cat(name):
-        existing = discord.utils.get(guild.categories, name=name)
-        if existing:
-            return existing
-        try:
-            return await guild.create_category(name, reason="Auto-setup on startup")
-        except Exception as e:
-            print(f"[SETUP] Could not create category '{name}': {e}")
-            return None
-
-    async def _get_or_create_ch(name, category, topic="", overwrites=None):
-        existing = discord.utils.get(guild.text_channels, name=name)
-        if existing:
-            return existing
-        if category is None:
-            return None
-        kwargs = {"reason": "Auto-setup on startup", "category": category}
-        if topic:
-            kwargs["topic"] = topic
-        if overwrites:
-            kwargs["overwrites"] = overwrites
-        try:
-            return await guild.create_text_channel(name, **kwargs)
-        except Exception as e:
-            print(f"[SETUP] Could not create #{name}: {e}")
-            return None
-
-    def _public_ow():
-        ow = {
-            guild.default_role: discord.PermissionOverwrite(read_messages=True,  send_messages=False),
-            guild.me:           discord.PermissionOverwrite(read_messages=True,  send_messages=True, manage_channels=True),
-        }
-        if admin_role: ow[admin_role] = discord.PermissionOverwrite(read_messages=True, send_messages=True)
-        return ow
-
-    def _members_ow():
-        ow = {
-            guild.default_role: discord.PermissionOverwrite(read_messages=False),
-            guild.me:           discord.PermissionOverwrite(read_messages=True,  send_messages=True, manage_channels=True),
-        }
-        if verified_role: ow[verified_role] = discord.PermissionOverwrite(read_messages=True, send_messages=True)
-        if member_role:   ow[member_role]   = discord.PermissionOverwrite(read_messages=True, send_messages=True)
-        if admin_role:    ow[admin_role]    = discord.PermissionOverwrite(read_messages=True, send_messages=True)
-        return ow
-
-    def _staff_ow():
-        ow = {
-            guild.default_role: discord.PermissionOverwrite(read_messages=False),
-            guild.me:           discord.PermissionOverwrite(read_messages=True,  send_messages=True, manage_channels=True),
-        }
-        if admin_role: ow[admin_role] = discord.PermissionOverwrite(read_messages=True, send_messages=True)
-        if staff_role: ow[staff_role] = discord.PermissionOverwrite(read_messages=True, send_messages=True)
-        if owner_role: ow[owner_role] = discord.PermissionOverwrite(read_messages=True, send_messages=True)
-        return ow
-
-    def _admin_ow():
-        ow = {
-            guild.default_role: discord.PermissionOverwrite(read_messages=False),
-            guild.me:           discord.PermissionOverwrite(read_messages=True,  send_messages=True, manage_channels=True),
-        }
-        if admin_role: ow[admin_role] = discord.PermissionOverwrite(read_messages=True, send_messages=True)
-        if owner_role: ow[owner_role] = discord.PermissionOverwrite(read_messages=True, send_messages=True)
-        return ow
-
-    def _vouches_ow():
-        ow = {
-            guild.default_role: discord.PermissionOverwrite(read_messages=True, send_messages=False),
-            guild.me:           discord.PermissionOverwrite(read_messages=True, send_messages=True, manage_channels=True),
-        }
-        if admin_role: ow[admin_role] = discord.PermissionOverwrite(read_messages=True, send_messages=True)
-        return ow
-
-    def _vip_ow():
-        ow = {
-            guild.default_role: discord.PermissionOverwrite(read_messages=False),
-            guild.me:           discord.PermissionOverwrite(read_messages=True, send_messages=True, manage_channels=True),
-        }
-        if vip_role:   ow[vip_role]   = discord.PermissionOverwrite(read_messages=True, send_messages=True)
-        if admin_role: ow[admin_role] = discord.PermissionOverwrite(read_messages=True, send_messages=True)
-        return ow
-
-    # ── SABFlippy layout — matches screenshot exactly ──
-
-    # RULES
-    cat_rules = await _get_or_create_cat("RULES")
-    await _get_or_create_ch("📋┃rules", cat_rules, "Server rules", _public_ow())
-
-    # ❗ IMPORTANT
-    cat_imp = await _get_or_create_cat("❗ IMPORTANT")
-    await _get_or_create_ch("📢┃announcements",     cat_imp, "Casino announcements",     _public_ow())
-    await _get_or_create_ch("📢┃bot-announcements", cat_imp, "Bot update announcements", _public_ow())
-    await _get_or_create_ch("🎁┃giveaways",         cat_imp, "Giveaways and rain!",      _members_ow())
-    await _get_or_create_ch("✅┃are-we-legit",      cat_imp, "Proof we pay out",         _vouches_ow())
-
-    # Extra
-    cat_extra = await _get_or_create_cat("Extra")
-    await _get_or_create_ch("🎁┃tips",          cat_extra, "Send tips to others",              _members_ow())
-    await _get_or_create_ch("✨┃rain",           cat_extra, "Gem rain events",                 _members_ow())
-    await _get_or_create_ch("🎁┃promo-codes",   cat_extra, "Redeem promo codes here",          _members_ow())
-    await _get_or_create_ch("💜┃boost-rewards", cat_extra, "Rewards for boosting the server",  _members_ow())
-    await _get_or_create_ch("🚨┃withdrawals",   cat_extra, "Use /withdraw to request a withdrawal", _members_ow())
-
-    # Chat
-    cat_chat = await _get_or_create_cat("Chat")
-    games_ch = await _get_or_create_ch("💬┃general", cat_chat, "General chat",      _members_ow())
-    await _get_or_create_ch("🖼️┃media",               cat_chat, "Share media here",  _members_ow())
-    await _get_or_create_ch("🤝┃vouch",                cat_chat, "Vouch for our service", _members_ow())
-
-    # 🔒 VERIFICATION
-    cat_verify = await _get_or_create_cat("🔒 VERIFICATION")
-    await _get_or_create_ch("✅┃verify", cat_verify, "Verify to access the server", {
-        guild.default_role: discord.PermissionOverwrite(read_messages=True, send_messages=False),
-        guild.me:           discord.PermissionOverwrite(read_messages=True, send_messages=True, manage_channels=True),
-    })
-
-    # 👑 VIP
-    cat_vip = await _get_or_create_cat("👑 VIP")
-    await _get_or_create_ch("👑┃vip-lounge", cat_vip, "Exclusive VIP lounge", _vip_ow())
-    await _get_or_create_ch("💎・vip-room",  cat_vip, "Private VIP room — use /createviproom to get your own", _vip_ow())
-
-    # 📊 LOGS
-    cat_logs        = await _get_or_create_cat("📊 LOGS")
-    game_log_ch     = await _get_or_create_ch("📊┃game-log",         cat_logs, "All game results",       _admin_ow())
-    finance_log_ch  = await _get_or_create_ch("💰┃finance-log",      cat_logs, "Deposits & withdrawals", _admin_ow())
-    tip_log_ch      = await _get_or_create_ch("💸┃tip-log",          cat_logs, "Tip transactions",       _admin_ow())
-    invite_log_ch   = await _get_or_create_ch("📨┃invite-log",       cat_logs, "Invite reward logs",     _admin_ow())
-    verify_log_ch   = await _get_or_create_ch("✅┃verify-log",       cat_logs, "Verification logs",      _admin_ow())
-    vouches_ch      = await _get_or_create_ch("✅┃are-we-legit-log",  cat_logs, "Public vouch feed",      _admin_ow())
-    withdraw_log_ch = await _get_or_create_ch("🚨┃withdraws",        cat_logs, "All withdrawal tickets", _staff_ow())
-
-    # Deposits — ticket channels (deposit-XXXX) live here, NEVER deleted
-    cat_deposits = await _get_or_create_cat("Deposits")
-    await _get_or_create_ch("💳┃deposits", cat_deposits, "Use /deposit to open a ticket", _members_ow())
-
-    # Withdraws — ticket channels (wd-XXXX) live here, NEVER deleted
-    await _get_or_create_cat("Withdraws")
-
-    cb_ch = games_ch  # case battles use general
-
-    # ── Save channel IDs to DB and globals ──
-    global LOG_CHANNEL_ID, FINANCE_LOG_ID, INVITE_LOG_ID, TIP_LOG_ID
-    global CASE_BATTLE_CHANNEL_ID, CASE_BATTLE_LOG_ID, VOUCHES_CHANNEL_ID
-
-    if game_log_ch:    LOG_CHANNEL_ID         = game_log_ch.id
-    if finance_log_ch: FINANCE_LOG_ID         = finance_log_ch.id
-    if invite_log_ch:  INVITE_LOG_ID          = invite_log_ch.id
-    if tip_log_ch:     TIP_LOG_ID             = tip_log_ch.id
-    if cb_ch:          CASE_BATTLE_CHANNEL_ID = cb_ch.id; CASE_BATTLE_LOG_ID = cb_ch.id
-    if vouches_ch:     VOUCHES_CHANNEL_ID     = vouches_ch.id
-
-    settings = {}
-    if game_log_ch:     settings["channel_game_log"]     = str(game_log_ch.id)
-    if finance_log_ch:  settings["channel_finance_log"]  = str(finance_log_ch.id)
-    if tip_log_ch:      settings["channel_tip_log"]      = str(tip_log_ch.id)
-    if invite_log_ch:   settings["channel_invite_log"]   = str(invite_log_ch.id)
-    if verify_log_ch:   settings["channel_verify_log"]   = str(verify_log_ch.id)
-    if cb_ch:           settings["channel_case_battles"] = str(cb_ch.id)
-    if vouches_ch:      settings["channel_vouches"]      = str(vouches_ch.id)
-    if games_ch:        settings["channel_games"]        = str(games_ch.id)
-    if withdraw_log_ch: settings["channel_withdraw_log"] = str(withdraw_log_ch.id)
-
-    if settings:
-        conn = await get_conn()
-        try:
-            for key, val in settings.items():
-                await conn.execute(
-                    "INSERT INTO bot_settings (key, value) VALUES ($1, $2) "
-                    "ON CONFLICT (key) DO UPDATE SET value=$2",
-                    key, val
-                )
-        except Exception as e:
-            print(f"[SETUP] DB save error: {e}")
-        finally:
-            await release_conn(conn)
-
-    print(f"[SETUP] Auto-channel setup complete")
+async def _auto_create_channels():
+    """Channel auto-creation is disabled. Channel IDs are loaded from the DB."""
+    await asyncio.sleep(5)
+    await _load_channel_ids()
+    print("[SETUP] Channel IDs loaded from DB (auto channel creation is disabled)")
 
 async def _migrate_add_deposited_column():
     """One-time migration: add missing columns and tables to existing DBs."""
@@ -2026,80 +1805,162 @@ async def on_member_join(member: discord.Member):
     except Exception as e:
         print(f"[INVITE] Error tracking invite: {e}")
 
-    # ── Store pending verification (don't give roles yet) ────
+    # ── Auto-assign Member role on join ──
+    member_role = await ensure_member_role(guild)
+    if member_role and member_role not in member.roles:
+        try:
+            await member.add_roles(member_role, reason="Auto-assigned Member role on join")
+        except Exception as e:
+            print(f"[INVITE] Could not assign Member role to {member}: {e}")
+
+    # ── Store inviter — reward fires in on_member_update when Member role is confirmed ──
+    # Supports external verification bots that grant Member role after a separate verify step.
+    if inviter_id:
+        conn = await get_conn()
+        try:
+            already = await conn.fetchrow(
+                "SELECT invitee_id FROM invite_rewards WHERE invitee_id=$1", str(member.id))
+            pending = await conn.fetchrow(
+                "SELECT member_id FROM pending_verifications WHERE member_id=$1", str(member.id))
+            if not already and not pending:
+                await conn.execute(
+                    """
+                    INSERT INTO pending_verifications (member_id, guild_id, inviter_id, joined_at)
+                    VALUES ($1, $2, $3, $4)
+                    ON CONFLICT (member_id) DO UPDATE SET inviter_id=$3, joined_at=$4
+                    """,
+                    str(member.id), str(guild.id), inviter_id, now_ts()
+                )
+                print(f"[INVITE] Stored pending invite: {member.name} invited by {inviter_id} — awaiting Member role")
+        except Exception as e:
+            print(f"[INVITE] Could not store pending invite: {e}")
+        finally:
+            await release_conn(conn)
+
+
+
+@bot.event
+async def on_member_update(before: discord.Member, after: discord.Member):
+    """Pay invite reward when the invited user gains the Member role."""
+    # Only fire when Member role is newly added
+    had_member = any(r.name == MEMBER_ROLE_NAME for r in before.roles)
+    has_member  = any(r.name == MEMBER_ROLE_NAME for r in after.roles)
+    if had_member or not has_member:
+        return
+
     conn = await get_conn()
     try:
+        pending = await conn.fetchrow(
+            "SELECT inviter_id FROM pending_verifications WHERE member_id=$1",
+            str(after.id)
+        )
+        if not pending or not pending["inviter_id"]:
+            return
+
+        inviter_id = pending["inviter_id"]
+
+        # Delete pending row first to prevent double-pay on rapid role changes
         await conn.execute(
-            """INSERT INTO pending_verifications (member_id, guild_id, inviter_id, joined_at)
-               VALUES ($1, $2, $3, $4)
-               ON CONFLICT (member_id) DO UPDATE SET guild_id=$2, inviter_id=$3, joined_at=$4""",
-            str(member.id), str(guild.id), inviter_id, now_ts()
+            "DELETE FROM pending_verifications WHERE member_id=$1", str(after.id)
         )
-    except Exception as e:
-        print(f"[VERIFY] Failed to store pending: {e}")
-    finally:
-        await release_conn(conn)
 
-    # ── DM the new member to verify ──────────────────────────
-    # Find the verify channel to link them to
-    conn = await get_conn()
-    try:
-        ch_row = await conn.fetchrow("SELECT value FROM bot_settings WHERE key='verify_channel_id'")
-    finally:
-        await release_conn(conn)
+        # Guard: suspended inviter or already rewarded
+        suspended = await conn.fetchrow(
+            "SELECT 1 FROM suspended_invite_rewards WHERE user_id=$1", inviter_id)
+        already = await conn.fetchrow(
+            "SELECT invitee_id FROM invite_rewards WHERE invitee_id=$1", str(after.id))
+        if suspended or already:
+            return
 
-    verify_channel = None
-    if ch_row and ch_row["value"] and str(ch_row["value"]).isdigit():
-        verify_channel = guild.get_channel(int(ch_row["value"]))
-    ch_mention = verify_channel.mention if verify_channel else "#verify"
+        setting = await conn.fetchrow("SELECT value FROM bot_settings WHERE key='invite_reward'")
+        reward  = int(setting["value"]) if setting else 0
+        if reward <= 0:
+            return
 
-    try:
-        dm_embed = discord.Embed(
-            title=f"👋  Welcome to {guild.name}!",
+        guild       = after.guild
+        inviter_obj = guild.get_member(int(inviter_id)) or await bot.fetch_user(int(inviter_id))
+        if not inviter_obj:
+            return
+
+        await ensure_user(conn, inviter_obj)
+        await update_balance(conn, int(inviter_id), reward)
+        await log_transaction(conn, int(inviter_id), "invite_reward", reward,
+                              f"invited {after.name} (Member role confirmed)")
+        await add_wager_req(conn, int(inviter_id), reward, "invite_reward")
+        await conn.execute(
+            """INSERT INTO invite_rewards (invitee_id, inviter_id, rewarded_at, reward_amt, wagered_so_far, req_met)
+               VALUES ($1, $2, $3, $4, 0, FALSE) ON CONFLICT (invitee_id) DO NOTHING""",
+            str(after.id), inviter_id, now_ts(), reward
+        )
+        print(f"[INVITE] Paid reward to {inviter_obj} ({format_amount(reward)}) — {after.name} received Member role")
+
+        log_e = discord.Embed(
+            title="✦  Invite Reward Triggered",
             description=(
-                f"To access the server, you need to **verify** first.\n\n"
-                f"Head to {ch_mention} and click **✅ Verify Me** to get access instantly.\n\n"
-                f"*This keeps the server safe from bots and raiders.*"
+                f"**{after.name}** received the Member role\n"
+                f"{inviter_obj.mention} earned **{format_amount(reward)}** 💎"
             ),
-            color=discord.Color(0x57F287)
+            color=C_WIN
         )
-        dm_embed.set_footer(text=guild.name)
-        await member.send(embed=dm_embed)
-    except Exception:
-        pass  # DMs closed — that's fine, the verify channel is still there
+        log_e.add_field(name="👤 Inviter",  value=f"{inviter_obj.mention}\n`{inviter_obj}`", inline=True)
+        log_e.add_field(name="🆕 Invitee", value=f"{after.mention}\n`{after}`",              inline=True)
+        log_e.add_field(name="💎 Reward",  value=f"**{format_amount(reward)} 💎**",             inline=True)
+        _brand_embed(log_e)
+        await send_invite_log(log_e)
+
+        try:
+            dm = discord.Embed(
+                title="🎉  Invite Reward!",
+                description=(
+                    f"**{after.name}** just got the Member role and you earned\n"
+                    f"**{format_amount(reward)} 💎**!\n\nKeep inviting to earn more 👑"
+                ),
+                color=C_WIN
+            )
+            _brand_embed(dm)
+            await inviter_obj.send(embed=dm)
+        except Exception:
+            pass
+
+    except Exception as e:
+        print(f"[INVITE] on_member_update error: {e}")
+    finally:
+        await release_conn(conn)
 
 async def send_invite_log(embed: discord.Embed):
-    """Send to the invite rewards log channel (configured via /setinvitelog)."""
-    conn = await get_conn()
-    try:
-        row = await conn.fetchrow("SELECT value FROM bot_settings WHERE key='channel_invite_log'")
-    finally:
-        await release_conn(conn)
-    if not row:
-        print("[INVITE LOG] No log channel set — use /setinvitelog")
+    """Send to the invite rewards log channel (set via /setinvitelog → INVITE_LOG_ID global)."""
+    if not INVITE_LOG_ID:
+        print("[INVITE LOG] No channel set — use /setinvitelog")
         return
-    try:
-        ch_id = int(row["value"])
-    except (ValueError, TypeError):
-        print(f"[INVITE LOG] Invalid channel ID stored: {row['value']}")
-        return
-    ch = bot.get_channel(ch_id)
+    ch = bot.get_channel(INVITE_LOG_ID)
     if ch is None:
         try:
-            ch = await bot.fetch_channel(ch_id)
+            ch = await bot.fetch_channel(INVITE_LOG_ID)
         except Exception as e:
-            print(f"[INVITE LOG] Could not fetch channel {ch_id}: {e}")
+            print(f"[INVITE LOG] Could not fetch channel {INVITE_LOG_ID}: {e}")
             return
-    if not isinstance(ch, discord.TextChannel):
-        print(f"[INVITE LOG] Channel {ch_id} is not a text channel")
-        return
     try:
         await ch.send(embed=embed)
-        print(f"[INVITE LOG] Sent to #{ch.name}")
     except discord.Forbidden:
         print(f"[INVITE LOG] Missing send permission in #{ch.name}")
     except Exception as e:
         print(f"[INVITE LOG] Failed to send: {e}")
+
+async def send_reward_log(embed: discord.Embed):
+    """Send to the rewards log channel (rain, promo, daily, boost — set via /setrewardlog)."""
+    if not REWARD_LOG_ID:
+        return
+    ch = bot.get_channel(REWARD_LOG_ID)
+    if ch is None:
+        try:
+            ch = await bot.fetch_channel(REWARD_LOG_ID)
+        except Exception as e:
+            print(f"[REWARD LOG] Could not fetch channel {REWARD_LOG_ID}: {e}")
+            return
+    try:
+        await ch.send(embed=embed)
+    except Exception as e:
+        print(f"[REWARD LOG] Failed to send: {e}")
 
 async def send_log(embed: discord.Embed):
     """Send to the game results log channel."""
@@ -2309,7 +2170,7 @@ async def cmd_balance(interaction: discord.Interaction):
         title=f"💎 {interaction.user.display_name}'s Balance",
         color=C_GOLD,
         description=(
-            f"💰 Balance: **{format_amount(balance)}** 💎\n"
+            f"💎 Balance: **{format_amount(balance)}** 💎\n"
             f"🎲 Wagered: **{format_amount(wagered)}** 💎\n"
             f"📈 Profit: **{pnl_sign}{format_amount(abs(net_profit))}** 💎\n"
             f"\n"
@@ -2588,8 +2449,8 @@ async def cmd_tip(interaction: discord.Interaction, user: discord.Member, amount
             f"```"
         )
     )
-    embed.add_field(name="Your balance",  value=f"`{format_amount(sender_bal)}`", inline=True)
-    embed.add_field(name="Their balance", value=f"`{format_amount(recv_bal)}`",   inline=True)
+    embed.add_field(name="Your balance",  value=f"`{format_amount(sender_bal)} 💎`", inline=True)
+    embed.add_field(name="Their balance", value=f"`{format_amount(recv_bal)} 💎`",   inline=True)
     _brand_embed(embed)
     await interaction.response.send_message(embed=embed)
 
@@ -3729,13 +3590,14 @@ class CoinflipView(BaseGameView):
         gif_url   = result_gif_url
         gif_valid = bool(
             gif_url and gif_url.startswith("http") and "PASTE_" not in gif_url
-            and any(gif_url.lower().endswith(ext) for ext in (".gif", ".webp", ".png", ".jpg"))
+            and not gif_url.endswith("PASTE_HEADS_HERE.webp") and not gif_url.endswith("PASTE_TAILS_HERE.webp")
+            and any(gif_url.lower().endswith(ext) for ext in (".gif", ".webp", ".png", ".jpg", ".jpeg"))
         )
         # Use dedicated spinning GIF during animation phase if configured
         spin_gif_url = COINFLIP_SPINNING_GIF
         spin_gif_valid = bool(
             spin_gif_url and spin_gif_url.startswith("http") and "PASTE_" not in spin_gif_url
-            and any(spin_gif_url.lower().endswith(ext) for ext in (".gif", ".webp", ".png", ".jpg"))
+            and any(spin_gif_url.lower().endswith(ext) for ext in (".gif", ".webp", ".png", ".jpg", ".jpeg"))
         )
         spin_embed = discord.Embed(
             color=C_GOLD,
@@ -4037,8 +3899,8 @@ class ProgressiveCoinflipView(BaseGameView):
                 f"```"
             )
         )
-        embed.add_field(name="Wager",   value=f"`{format_amount(self.initial_bet)}`", inline=True)
-        embed.add_field(name="Payout",  value=f"`{format_amount(payout)}`",           inline=True)
+        embed.add_field(name="Wager",   value=f"`{format_amount(self.initial_bet)} 💎`", inline=True)
+        embed.add_field(name="Payout",  value=f"`{format_amount(payout)} 💎`",           inline=True)
         embed.set_thumbnail(url=await get_avatar(self.creator))
         _brand_embed(embed)
 
@@ -4322,8 +4184,8 @@ class ProgressiveDiceView(BaseGameView):
                 f"```"
             )
         )
-        embed.add_field(name="Wager",   value=f"`{format_amount(self.initial_bet)}`", inline=True)
-        embed.add_field(name="Payout",  value=f"`{format_amount(payout)}`",           inline=True)
+        embed.add_field(name="Wager",   value=f"`{format_amount(self.initial_bet)} 💎`", inline=True)
+        embed.add_field(name="Payout",  value=f"`{format_amount(payout)} 💎`",           inline=True)
         embed.set_thumbnail(url=await get_avatar(self.creator))
         _brand_embed(embed)
 
@@ -4665,12 +4527,12 @@ class DiceView(BaseGameView):
                         # vs Bot: house pays out — apply win tax
                         payout_amt = await apply_win_payout(conn, self.creator.id, self.bet * 2, self.bet, "dice")
                         embed.add_field(name="Result",
-                            value=f"**✦ {self.creator.mention} WINS  +{format_amount(payout_amt - self.bet)}**", inline=False)
+                            value=f"**✦ {self.creator.mention} WINS  +{format_amount(payout_amt - self.bet)} 💎**", inline=False)
                         await record_game(conn, self.creator.id, True, self.bet, payout_amt)
                         await log_transaction(conn, self.creator.id, "dice_win", payout_amt - self.bet)
                     else:
                         embed.add_field(name="Result",
-                            value=f"**✦ {self.creator.mention} WINS  +{format_amount(self.bet)}**", inline=False)
+                            value=f"**✦ {self.creator.mention} WINS  +{format_amount(self.bet)} 💎**", inline=False)
                         await update_balance(conn, self.creator.id, self.bet * 2)
                         await record_game(conn, self.creator.id, True, self.bet, self.bet * 2)
                         await log_transaction(conn, self.creator.id, "dice_win", self.bet)
@@ -5211,7 +5073,7 @@ class BaccaratView(BaseGameView):
             outcome_icon = "You Lose 💀"
             returned_val = "0"
 
-        bac_net_str = f"+{format_amount(payout - self.bet)}" if payout > self.bet else ("±0" if payout == self.bet else f"-{format_amount(self.bet)}")
+        bac_net_str = f"+{format_amount(payout - self.bet)} 💎" if payout > self.bet else ("±0" if payout == self.bet else f"-{format_amount(self.bet)}")
         result_embed = discord.Embed(
             color=color,
             description=f"## 🃏  BACCARAT  {outcome_icon}"
@@ -5346,7 +5208,7 @@ async def cmd_baccarat(interaction: discord.Interaction, bet: str):
         color=C_GOLD,
         description="## 🃏  BACCARAT\n> Pick your side — closest to **9** wins!"
     )
-    embed.add_field(name="Wager",  value=f"`{format_amount(amt)}`", inline=True)
+    embed.add_field(name="Wager",  value=f"`{format_amount(amt)} 💎`", inline=True)
     embed.add_field(name="Player",  value="`1:1`",                       inline=True)
     embed.add_field(name="Banker",  value="`1:1`",                       inline=True)
     embed.add_field(name="Tie",     value="`8:1`",                       inline=True)
@@ -5745,7 +5607,7 @@ async def cmd_blackjack(interaction: discord.Interaction, bet: str):
             won     = False
         else:
             payout  = int(amt * 2.5)
-            result  = f"BLACKJACK! You win {format_amount(payout)}! 🎉"
+            result  = f"BLACKJACK! You win {format_amount(payout)} 💎! 🎉"
             color   = C_WIN
             is_push = False
             won     = True
@@ -5755,8 +5617,8 @@ async def cmd_blackjack(interaction: discord.Interaction, bet: str):
         bj_embed = discord.Embed(color=color, description=f"## ♠️  BJ — {result}")
         bj_embed.add_field(name=f"🃏 Your Hand ({pt})",   value=f"`{bj_str(ph)}`", inline=False)
         bj_embed.add_field(name=f"🎴 Dealer Hand ({dt})", value=f"`{bj_str(dh)}`", inline=False)
-        bj_embed.add_field(name="💰 Bet",    value=f"**{format_amount(total_bet)}**", inline=True)
-        bj_embed.add_field(name="🎁 Payout", value=f"**{format_amount(payout)}**",   inline=True)
+        bj_embed.add_field(name="💰 Bet",    value=f"**{format_amount(total_bet)} 💎**", inline=True)
+        bj_embed.add_field(name="🎁 Payout", value=f"**{format_amount(payout)} 💎**",   inline=True)
         bj_embed.add_field(name="📈 Net",    value=f"**{_net_str_bj}**",             inline=True)
         bj_embed.set_thumbnail(url=await get_avatar(interaction.user))
 
@@ -6162,7 +6024,7 @@ class WarView(BaseGameView):
             await interaction.edit_original_response(
                 embed=discord.Embed(
                     title="⚔️ WAR",
-                    description=f"💰 **Bet** • {format_amount(self.bet)} 💠\
+                    description=f"💰 **Bet** • {format_amount(self.bet)} 💎\
 \
 🤖 Bot called! Press **Start** to draw cards.",
                     color=C_LOSS),
@@ -6311,10 +6173,10 @@ class WarView(BaseGameView):
         payout_line = (
             f"↩️ **Bets returned**"
             if is_tie else
-            f"💰 **Payout** • {format_amount(payout)} 💠"
+            f"💰 **Payout** • {format_amount(payout)} 💎"
         )
         description = (
-            f"💰 **Bet** • {format_amount(self.bet)} 💠\
+            f"💰 **Bet** • {format_amount(self.bet)} 💎\
 "
             f"\
 "
@@ -6339,8 +6201,8 @@ class WarView(BaseGameView):
         )
 
         result_embed = discord.Embed(color=color, description=f"## ⚔️  WAR — {title}\n{result_desc(won, False, self.bet, payout)}")
-        result_embed.add_field(name="💰 Bet",    value=f"**{format_amount(self.bet)}**",  inline=True)
-        result_embed.add_field(name="🎁 Payout", value=f"**{format_amount(payout)}**",   inline=True)
+        result_embed.add_field(name="💰 Bet",    value=f"**{format_amount(self.bet)} 💎**",  inline=True)
+        result_embed.add_field(name="🎁 Payout", value=f"**{format_amount(payout)} 💎**",   inline=True)
         result_embed.set_thumbnail(url=await get_avatar(self.creator))
         _brand_embed(result_embed)
         await asyncio.sleep(0.3)
@@ -6402,7 +6264,7 @@ async def cmd_war(interaction: discord.Interaction, bet: str):
         return
     view = WarView(interaction.user, amt)
     description = (
-        f"💰 **Bet** • {format_amount(amt)} 💠\
+        f"💰 **Bet** • {format_amount(amt)} 💎\
 "
         f"\
 "
@@ -6800,7 +6662,7 @@ class HiloView(BaseGameView):
                     payout = await apply_win_payout(conn, self.creator.id, payout, self.bet, "hilo")
                     await record_game(conn, self.creator.id, True, self.bet, payout, game="hilo")
                     await log_transaction(conn, self.creator.id, "hilo_timeout_cashout", payout - self.bet)
-                    desc = f"Game timed out — auto cashed out **{format_amount(payout)}** ({self.rounds_won} correct guess{'es' if self.rounds_won != 1 else ''})."
+                    desc = f"Game timed out — auto cashed out **{format_amount(payout)} 💎** ({self.rounds_won} correct guess{'es' if self.rounds_won != 1 else ''})."
                 else:
                     await update_balance(conn, self.creator.id, self.bet)
                     desc = f"Game timed out — bet of **{format_amount(self.bet)}** refunded."
@@ -7202,7 +7064,7 @@ class TowersView(BaseGameView):
                     payout = await apply_win_payout(conn, self.creator.id, payout, self.bet, "towers")
                     await record_game(conn, self.creator.id, True, self.bet, payout)
                     await log_transaction(conn, self.creator.id, "towers_timeout_cashout", payout - self.bet)
-                    desc = f"Game timed out — auto cashed out **{format_amount(payout)}** ({self.rows_cleared} rows cleared)."
+                    desc = f"Game timed out — auto cashed out **{format_amount(payout)} 💎** ({self.rows_cleared} rows cleared)."
                 else:
                     await update_balance(conn, self.creator.id, self.bet)
                     desc = f"Game timed out — bet of **{format_amount(self.bet)}** refunded."
@@ -7659,7 +7521,7 @@ class RPSView(BaseGameView):
                     payout = await apply_win_payout(conn, self.creator.id, payout, self.bet, "rps")
                     await record_game(conn, self.creator.id, True, self.bet, payout)
                     await log_transaction(conn, self.creator.id, "rps_timeout_cashout", payout - self.bet)
-                    desc = f"Game timed out — auto cashed out **{format_amount(payout)}** ({self.wins} wins)."
+                    desc = f"Game timed out — auto cashed out **{format_amount(payout)} 💎** ({self.wins} wins)."
                 else:
                     await update_balance(conn, self.creator.id, self.bet)
                     desc = f"Game timed out — bet of **{format_amount(self.bet)}** refunded."
@@ -7701,6 +7563,14 @@ class RPSView(BaseGameView):
             await interaction.response.send_message("❌ Not your game.", ephemeral=True)
             return
         await self._cashout(interaction)
+
+# ╔══════════════════════════════════════════════════════════════╗
+# ║                    SABPOT  —  PART 2 OF 2                    ║
+# ║  Run main_part1.py — this file is appended at runtime.       ║
+# ║  To run the full bot: python main_part1.py                   ║
+# ╚══════════════════════════════════════════════════════════════╝
+# NOTE: This file continues directly from main_part1.py.
+# All imports, config, and shared utilities are defined there.
 
 # ╔══════════════════════════════════════════════════════════════╗
 # ║                    SABPOT  —  PART 2 OF 2                    ║
@@ -8073,7 +7943,7 @@ class MinesView(BaseGameView):
                     payout = await apply_win_payout(conn, self.creator.id, payout, self.bet, "mines")
                     await record_game(conn, self.creator.id, True, self.bet, payout, game="mines")
                     await log_transaction(conn, self.creator.id, "mines_timeout_cashout", payout - self.bet)
-                    desc = f"Game timed out — auto cashed out **{format_amount(payout)}** ({self.gems_found} gems found)."
+                    desc = f"Game timed out — auto cashed out **{format_amount(payout)} 💎** ({self.gems_found} gems found)."
                 else:
                     await update_balance(conn, self.creator.id, self.bet)
                     desc = f"Game timed out — bet of **{format_amount(self.bet)}** refunded."
@@ -9151,7 +9021,7 @@ class BalloonView(BaseGameView):
                     payout = await apply_win_payout(conn, self.creator.id, payout, self.bet, "balloon")
                     await record_game(conn, self.creator.id, True, self.bet, payout, game="balloon")
                     await log_transaction(conn, self.creator.id, "balloon_timeout_cashout", payout - self.bet)
-                    desc = f"Game timed out — auto cashed out **{format_amount(payout)}** ({self.pumps} pumps)."
+                    desc = f"Game timed out — auto cashed out **{format_amount(payout)} 💎** ({self.pumps} pumps)."
                 else:
                     await update_balance(conn, self.creator.id, self.bet)
                     desc = f"Game timed out — bet of **{format_amount(self.bet)}** refunded."
@@ -9311,11 +9181,11 @@ class SlotsView(BaseGameView):
         if won:
             color  = C_WIN
             header = f"🎉  {result_label}"
-            net_str = f"+{format_amount(payout - self.bet)}"
+            net_str = f"+{format_amount(payout - self.bet)} 💎"
         else:
             color  = 0xE74C3C
             header = f"💔  {result_label}"
-            net_str = f"-{format_amount(self.bet)}"
+            net_str = f"-{format_amount(self.bet)} 💎"
 
         _slot_tag = "+" if won else "-"
         result_embed = discord.Embed(
@@ -9325,7 +9195,7 @@ class SlotsView(BaseGameView):
                 f"```\n  {_slots_reels_str(reels)}  \n```\n"
                 f"```diff\n"
                 f"{_slot_tag} {net_str}\n"
-                f"# {mult}×  ·  wager {format_amount(self.bet)}\n"
+                f"# {mult}×  ·  wager {format_amount(self.bet)} 💎\n"
                 f"```"
             )
         )
@@ -10052,147 +9922,9 @@ async def ensure_verified_role(guild: discord.Guild) -> discord.Role | None:
 
 
 class VerifyView(discord.ui.View):
-    """Persistent verify button — survives bot restarts."""
+    """Verify button removed — kept as empty class to avoid breaking persistent view registration."""
     def __init__(self):
         super().__init__(timeout=None)
-
-    @discord.ui.button(
-        label="✅  Verify Me",
-        style=discord.ButtonStyle.success,
-        custom_id="verify_button_persistent"
-    )
-    async def verify_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        member = interaction.user
-        guild  = interaction.guild
-        if not guild or not isinstance(member, discord.Member):
-            await interaction.response.send_message("❌ This only works inside a server.", ephemeral=True)
-            return
-
-        verified_role = await ensure_verified_role(guild)
-        member_role   = await ensure_member_role(guild)
-
-        if not verified_role:
-            await interaction.response.send_message("❌ Could not find/create the Verified role. Check bot permissions.", ephemeral=True)
-            return
-
-        if verified_role in member.roles:
-            await interaction.response.send_message("✅ You're already verified!", ephemeral=True)
-            return
-
-        # Assign Verified + Member roles
-        roles_to_add = [r for r in [verified_role, member_role] if r and r not in member.roles]
-        try:
-            if roles_to_add:
-                await member.add_roles(*roles_to_add, reason="Verified via button")
-        except discord.Forbidden:
-            await interaction.response.send_message(
-                "❌ Bot doesn't have permission to assign roles. Ask an admin to fix role order.",
-                ephemeral=True)
-            return
-        except Exception as e:
-            print(f"[VERIFY] Failed to assign roles to {member}: {e}")
-            await interaction.response.send_message("⚠️  Something went wrong — try again.", ephemeral=True)
-            return
-
-        await interaction.response.send_message(
-            "✅ You've been **verified**! Welcome to the server — enjoy your stay.", ephemeral=True)
-
-        # ── Pull pending verification record & pay invite reward ──
-        conn = await get_conn()
-        try:
-            pending = await conn.fetchrow(
-                "SELECT inviter_id FROM pending_verifications WHERE member_id=$1",
-                str(member.id)
-            )
-            inviter_id = pending["inviter_id"] if pending else None
-
-            # Clean up pending record
-            await conn.execute(
-                "DELETE FROM pending_verifications WHERE member_id=$1", str(member.id))
-
-            if inviter_id:
-                # Check if this inviter is suspended
-                suspended = await conn.fetchrow(
-                    "SELECT 1 FROM suspended_invite_rewards WHERE user_id=$1", inviter_id)
-                if suspended:
-                    print(f"[INVITE] Rewards suspended for {inviter_id} — skipping on verify")
-                    inviter_id = None
-
-            if inviter_id:
-                # Check already rewarded
-                already = await conn.fetchrow(
-                    "SELECT invitee_id FROM invite_rewards WHERE invitee_id=$1", str(member.id))
-                if already:
-                    inviter_id = None
-
-            if inviter_id:
-                setting = await conn.fetchrow("SELECT value FROM bot_settings WHERE key='invite_reward'")
-                reward  = int(setting["value"]) if setting else 0
-                if reward > 0:
-                    inviter_obj = guild.get_member(int(inviter_id)) or await bot.fetch_user(int(inviter_id))
-                    if inviter_obj:
-                        await ensure_user(conn, inviter_obj)
-                        await update_balance(conn, int(inviter_id), reward)
-                        await log_transaction(conn, int(inviter_id), "invite_reward", reward,
-                                              f"invited {member.name} (verified)")
-                        await add_wager_req(conn, int(inviter_id), reward, "invite_reward")
-                        await conn.execute(
-                            """INSERT INTO invite_rewards (invitee_id, inviter_id, rewarded_at, reward_amt, wagered_so_far, req_met)
-                               VALUES ($1, $2, $3, $4, 0, FALSE) ON CONFLICT (invitee_id) DO NOTHING""",
-                            str(member.id), inviter_id, now_ts(), reward
-                        )
-                        print(f"[INVITE] Rewarded {inviter_obj} {format_amount(reward)} — {member.name} verified")
-
-                        # Log embed
-                        log_e = discord.Embed(
-                            title="✦  Invite Reward Triggered",
-                            description=f"**{member.name}** verified → {inviter_obj.mention} earned **{format_amount(reward)}** 💎",
-                            color=C_WIN
-                        )
-                        log_e.add_field(name="👤 Inviter",    value=f"{inviter_obj.mention}\n`{inviter_obj}`", inline=True)
-                        log_e.add_field(name="🆕 Invitee",   value=f"{member.mention}\n`{member}`",          inline=True)
-                        log_e.add_field(name="💰 Reward",    value=format_amount(reward),                     inline=True)
-                        _brand_embed(log_e)
-                        await send_invite_log(log_e)
-
-                        # DM inviter
-                        try:
-                            dm = discord.Embed(
-                                title="🎉  Invite Reward!",
-                                description=(
-                                    f"**{member.name}** just verified and you earned "
-                                    f"**{format_amount(reward)}** 💎!\n\nKeep inviting to earn more 👑"
-                                ),
-                                color=C_WIN
-                            )
-                            _brand_embed(dm)
-                            await inviter_obj.send(embed=dm)
-                        except Exception:
-                            pass
-
-        except Exception as e:
-            print(f"[VERIFY] Reward error: {e}")
-        finally:
-            await release_conn(conn)
-
-        # ── Verify log ───────────────────────────────────────
-        conn = await get_conn()
-        try:
-            log_ch_row = await conn.fetchrow("SELECT value FROM bot_settings WHERE key='verify_log_channel'")
-        finally:
-            await release_conn(conn)
-
-        if log_ch_row:
-            try:
-                log_ch = guild.get_channel(int(log_ch_row["value"]))
-                if log_ch:
-                    e = discord.Embed(title="✅ Member Verified", color=discord.Color(0x57F287))
-                    e.add_field(name="User",        value=f"{member.mention} `{member}`",                                         inline=True)
-                    e.add_field(name="Account Age", value=f"{(discord.utils.utcnow() - member.created_at).days}d old",            inline=True)
-                    e.set_footer(text=now_ts())
-                    await log_ch.send(embed=e)
-            except Exception as ex:
-                print(f"[VERIFY] Log error: {ex}")
 
 
 @bot.tree.command(name="sendverify", description="[Admin] Post the verification button and auto-lock all channels to Verified-only.")
@@ -10339,14 +10071,106 @@ async def cmd_setinvitelog(interaction: discord.Interaction, channel: discord.Te
     conn = await get_conn()
     try:
         await conn.execute(
-            """INSERT INTO bot_settings (key, value) VALUES ('invite_log_channel', $1)
+            """INSERT INTO bot_settings (key, value) VALUES ('channel_invite_log', $1)
                ON CONFLICT (key) DO UPDATE SET value=$1""",
             str(channel.id)
         )
     finally:
         await release_conn(conn)
+    global INVITE_LOG_ID
+    INVITE_LOG_ID = channel.id
     await interaction.response.send_message(
         f"✅ Invite reward logs will now be sent to {channel.mention}.", ephemeral=True)
+
+@bot.tree.command(name="setrewardlog", description="[Admin] Set the channel for rewards logs (rain, promo, daily, boost).")
+@app_commands.describe(channel="The channel to send reward notifications to")
+@admin_only()
+async def cmd_setrewardlog(interaction: discord.Interaction, channel: discord.TextChannel):
+    conn = await get_conn()
+    try:
+        await conn.execute(
+            """INSERT INTO bot_settings (key, value) VALUES ('channel_reward_log', $1)
+               ON CONFLICT (key) DO UPDATE SET value=$1""",
+            str(channel.id)
+        )
+    finally:
+        await release_conn(conn)
+    global REWARD_LOG_ID
+    REWARD_LOG_ID = channel.id
+    await interaction.response.send_message(
+        f"✅ Rewards log will now be sent to {channel.mention}.", ephemeral=True)
+
+@bot.tree.command(name="setgamelog", description="[Admin] Set the channel where game results are logged.")
+@app_commands.describe(channel="The game-log channel")
+@admin_only()
+async def cmd_setgamelog(interaction: discord.Interaction, channel: discord.TextChannel):
+    conn = await get_conn()
+    try:
+        await conn.execute(
+            """INSERT INTO bot_settings (key, value) VALUES ('channel_game_log', $1)
+               ON CONFLICT (key) DO UPDATE SET value=$1""",
+            str(channel.id)
+        )
+    finally:
+        await release_conn(conn)
+    global LOG_CHANNEL_ID
+    LOG_CHANNEL_ID = channel.id
+    await interaction.response.send_message(
+        f"✅ Game log will now be sent to {channel.mention}.", ephemeral=True)
+
+@bot.tree.command(name="setfinancelog", description="[Admin] Set the channel where deposits/withdrawals are logged.")
+@app_commands.describe(channel="The finance-log channel")
+@admin_only()
+async def cmd_setfinancelog(interaction: discord.Interaction, channel: discord.TextChannel):
+    conn = await get_conn()
+    try:
+        await conn.execute(
+            """INSERT INTO bot_settings (key, value) VALUES ('channel_finance_log', $1)
+               ON CONFLICT (key) DO UPDATE SET value=$1""",
+            str(channel.id)
+        )
+    finally:
+        await release_conn(conn)
+    global FINANCE_LOG_ID
+    FINANCE_LOG_ID = channel.id
+    await interaction.response.send_message(
+        f"✅ Finance log will now be sent to {channel.mention}.", ephemeral=True)
+
+@bot.tree.command(name="settiplog", description="[Admin] Set the admin tip-log channel.")
+@app_commands.describe(channel="The admin tip-log channel")
+@admin_only()
+async def cmd_settiplog(interaction: discord.Interaction, channel: discord.TextChannel):
+    conn = await get_conn()
+    try:
+        await conn.execute(
+            """INSERT INTO bot_settings (key, value) VALUES ('channel_tip_log', $1)
+               ON CONFLICT (key) DO UPDATE SET value=$1""",
+            str(channel.id)
+        )
+    finally:
+        await release_conn(conn)
+    global TIP_LOG_ID
+    TIP_LOG_ID = channel.id
+    await interaction.response.send_message(
+        f"✅ Tip log will now be sent to {channel.mention}.", ephemeral=True)
+
+@bot.tree.command(name="settippublic", description="[Admin] Set the public tipping announcement channel.")
+@app_commands.describe(channel="The public tipping channel")
+@admin_only()
+async def cmd_settippublic(interaction: discord.Interaction, channel: discord.TextChannel):
+    conn = await get_conn()
+    try:
+        await conn.execute(
+            """INSERT INTO bot_settings (key, value) VALUES ('channel_tip_public', $1)
+               ON CONFLICT (key) DO UPDATE SET value=$1""",
+            str(channel.id)
+        )
+    finally:
+        await release_conn(conn)
+    global TIP_PUBLIC_LOG_ID
+    TIP_PUBLIC_LOG_ID = channel.id
+    await interaction.response.send_message(
+        f"✅ Public tip announcements will now go to {channel.mention}.", ephemeral=True)
 
 @bot.tree.command(name="managerewards", description="[Admin] Suspend or restore invite rewards for a user.")
 @app_commands.describe(
@@ -10431,7 +10255,7 @@ async def cmd_invitestats(interaction: discord.Interaction):
     await interaction.followup.send(embed=embed)
 
 
-# Points per dollar (used by stock price display)
+# Coins per dollar (used by stock price display)
 COINS_PER_DOLLAR = 10_000  # 10,000 gems = $1
 
 async def ensure_user_by_id(conn, user_id_str: str):
@@ -10455,9 +10279,9 @@ async def ensure_user_by_id(conn, user_id_str: str):
 # ── helpers ───────────────────────────────────────────────
 
 async def _get_stock(conn) -> list:
-    """Return all stock rows ordered by unit_value desc."""
+    """Return only in-stock rows ordered by unit_value desc."""
     return await conn.fetch(
-        "SELECT item_name, quantity, unit_value FROM stock ORDER BY unit_value DESC"
+        "SELECT item_name, quantity, unit_value FROM stock WHERE quantity > 0 ORDER BY unit_value DESC"
     )
 
 async def _get_stock_item(conn, item_name: str):
@@ -10479,10 +10303,9 @@ async def _stock_embed(rows) -> discord.Embed:
         val  = r["unit_value"]
         name = r["item_name"]
         usd  = val / COINS_PER_DOLLAR
-        avail = f"✅ {qty} left" if qty > 0 else "❌ Out of stock"
         lines.append(
             f"**{name}**\n"
-            f"> Cost: `{format_amount(val)} gems`  ·  `${usd:.2f}`  ·  {avail}"
+            f"> Cost: `{format_amount(val)} coins`  ·  `${usd:.2f}`  ·  ✅ {qty} left"
         )
     e.description = "\n\n".join(lines)
     _brand_embed(e)
@@ -10807,10 +10630,14 @@ async def cmd_withdraw(interaction: discord.Interaction):
             await interaction.followup.send("❌ Insufficient balance.", ephemeral=True)
             return
 
-        # Reserve stock
+        # Reserve stock & auto-remove if now out of stock
         await conn.execute(
             "UPDATE stock SET quantity = quantity - $1 WHERE item_name = $2",
             quantity, item
+        )
+        await conn.execute(
+            "DELETE FROM stock WHERE item_name = $1 AND quantity <= 0",
+            item
         )
 
         # Create queue entry
@@ -13584,7 +13411,7 @@ async def cmd_rakeback(interaction: discord.Interaction):
     embed.add_field(name="Your Rank",        value=f"{rank_name_role}",                   inline=True)
     embed.add_field(name="Rakeback Rate",    value=f"{rate*100:.1f}%",                    inline=True)
     embed.add_field(name="Wagered (Period)", value=format_amount(wagered_since),           inline=True)
-    embed.add_field(name="💎 You Received",  value=f"**{format_amount(reward)}**",        inline=True)
+    embed.add_field(name="💎 You Received",  value=f"**{format_amount(reward)} 💎**",        inline=True)
     embed.add_field(name="New Balance",      value=format_amount(new_bal),                inline=True)
     embed.add_field(name="Next Claim",       value="In 24 hours",                         inline=True)
     embed.add_field(name="📊 All Rates", value=rate_table, inline=False)
@@ -15136,8 +14963,8 @@ class CaseBattleLobbyView(discord.ui.View):
         )
         e.add_field(name=f"{c['emoji']} Case",      value=f"**{c['name']}**",                       inline=True)
         e.add_field(name="📦 Cases Each",            value=f"**{self.num_cases}x**",                 inline=True)
-        e.add_field(name="💰 Entry",                 value=f"**{format_amount(self.entry_cost)}**",  inline=True)
-        e.add_field(name="🏆 Prize Pool",            value=f"**{format_amount(total_pot)}**",        inline=True)
+        e.add_field(name="💰 Entry",                 value=f"**{format_amount(self.entry_cost)} 💎**",  inline=True)
+        e.add_field(name="🏆 Prize Pool",            value=f"**{format_amount(total_pot)} 💎**",        inline=True)
         e.add_field(name="👥 Slots",                 value=progress,                                 inline=True)
         e.add_field(name="⏳ Expires",               value="5 minutes",                              inline=True)
         e.add_field(name="📋 Roster",                value="\n".join(roster),                        inline=False)
@@ -15530,8 +15357,8 @@ async def _run_cb(battle_id, message, case_key, num_cases,
         )
     )
     result_embed.add_field(name="Scoreboard", value="\n\n".join(board_lines), inline=False)
-    result_embed.add_field(name="Payout",      value=f"`{format_amount(share)}`",            inline=True)
-    result_embed.add_field(name="Item Value",  value=f"`{format_amount(total_items_value)}`", inline=True)
+    result_embed.add_field(name="Payout",      value=f"`{format_amount(share)} 💎`",            inline=True)
+    result_embed.add_field(name="Item Value",  value=f"`{format_amount(total_items_value)} 💎`", inline=True)
     result_embed.add_field(name="Case",        value=f"{CASES[case_key]['emoji']} {CASES[case_key]['name']} ×{num_cases}", inline=True)
     result_embed.set_footer(text=f"Battle #{battle_id}  ·  {now_ts()}")
 
