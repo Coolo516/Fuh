@@ -5077,14 +5077,11 @@ class BaccaratView(BaseGameView):
         p_display = bac_str(ph)
         b_display = bac_str(bh)
         if is_push:
-            result_label = "It's a Tie!
-🤝 It's a tie!"
+            result_label = "It's a Tie!\n🤝 It's a tie!"
         elif won:
-            result_label = f"**{bet_type} Wins!**
-🏆 {bet_type} wins this round!"
+            result_label = f"**{bet_type} Wins!**\n🏆 {bet_type} wins this round!"
         else:
-            result_label = f"**{winner} Wins!**
-🏦 {winner} wins this round!"
+            result_label = f"**{winner} Wins!**\n🏦 {winner} wins this round!"
 
         result_embed = discord.Embed(
             color=color,
