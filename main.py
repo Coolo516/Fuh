@@ -1,6 +1,7 @@
 # ╔══════════════════════════════════════════════════════════════╗
 # ║                    SABPOT  —  PART 1 OF 2                    ║
 # ║  Paste this file first, then immediately paste Part 2 below. ║
+# ║  UI REVAMP: embeds match SABFlippy screenshot style          ║
 # ╚══════════════════════════════════════════════════════════════╝
 
 import discord
@@ -2166,13 +2167,14 @@ async def cmd_balance(interaction: discord.Interaction):
     net_profit = balance - wagered
     pnl_sign   = "+" if net_profit >= 0 else "-"
 
+    profit_str = f"+{format_amount(abs(net_profit))}" if net_profit >= 0 else f"-{format_amount(abs(net_profit))}"
     embed = discord.Embed(
-        title=f"💎 {interaction.user.display_name}'s Balance",
         color=C_GOLD,
         description=(
-            f"💎 Balance: **{format_amount(balance)}** 💎\n"
-            f"🎲 Wagered: **{format_amount(wagered)}** 💎\n"
-            f"📈 Profit: **{pnl_sign}{format_amount(abs(net_profit))}** 💎\n"
+            f"## 💎  {interaction.user.display_name}'s Balance\n"
+            f"💰 **Balance:** {format_amount(balance)} 💎\n"
+            f"🎲 **Wagered:** {format_amount(wagered)} 💎\n"
+            f"📈 **Profit:** {profit_str} 💎\n"
             f"\n"
             f"Use /deposit to obtain balance\n"
             f"Use /stock to view items available for withdraw\n"
@@ -2180,8 +2182,7 @@ async def cmd_balance(interaction: discord.Interaction):
         )
     )
     embed.set_thumbnail(url=await get_avatar(interaction.user))
-    embed.set_author(name="🎲 SABPOT", icon_url=LOGO_URL)
-    embed.set_footer(text=CASINO_MARK)
+    _brand_embed(embed)
     await interaction.response.send_message(embed=embed)
 
 @bot.tree.command(name="rank", description="View your wagering rank and progress.")
@@ -2265,20 +2266,20 @@ async def cmd_leaderboard(interaction: discord.Interaction, sort: str = "wagered
         return
 
     def _lb_embed(lb_rows, lb_sort):
-        SLOTS = ["🥇", "🥈", "🥉", "④", "⑤", "⑥", "⑦", "⑧", "⑨", "⑩"]
+        MEDAL = {0: "🥇", 1: "🥈", 2: "🥉"}
         lines = []
         for i, r in enumerate(lb_rows):
             rank_e, _, _, _, _ = get_rank(r["wagered"])
             val  = format_amount(r[lb_sort])
-            slot = SLOTS[i] if i < len(SLOTS) else f"`{i+1}`"
-            lines.append(f"{slot}  {rank_e} <@{r['user_id']}> `{val}`")
+            medal = MEDAL.get(i, f"#{i+1}")
+            lines.append(f"{medal} {rank_e} <@{r['user_id']}> • {val}")
         lbl = "Balance" if lb_sort == "balance" else "Total Wager"
-        ts  = datetime.now(timezone.utc).strftime("%d %b %H:%M UTC")
         e   = discord.Embed(
             color=C_GOLD,
             title=f"🎰  Leaderboard — {lbl}",
             description="\n".join(lines)
         )
+        e.set_footer(text=f"SABFlippy  •  Use /rank to check your stats  |  Today at {datetime.now(timezone.utc).strftime('%H:%M')}")
         _brand_embed(e)
         return e
 
@@ -2454,34 +2455,20 @@ async def cmd_tip(interaction: discord.Interaction, user: discord.Member, amount
     _brand_embed(embed)
     await interaction.response.send_message(embed=embed)
 
-    # Tip log in SABFlippy style
-    log_e = discord.Embed(title="🪙 Gem Transfer", color=C_GOLD)
-    log_e.add_field(
-        name="👤 From",
-        value=f"{interaction.user.mention}\
-{interaction.user.id}",
-        inline=False
-    )
-    log_e.add_field(
-        name="👤 To",
-        value=f"{user.mention}\
-{user.id}",
-        inline=False
-    )
-    log_e.add_field(name="💰 Amount", value=format_amount(amt), inline=False)
-    log_e.add_field(
-        name="📊 New Balances",
-        value=(
-            f"{interaction.user.mention}: {format_amount(sender_bal)}\
-"
-            f"{user.mention}: {format_amount(recv_bal)}"
-        ),
-        inline=False
-    )
-    log_e.add_field(
-        name="🎯 Wager Requirement Added",
-        value=f"{user.mention} must wager: {format_amount(amt)}",
-        inline=False
+    # Tip log — matches SABFlippy screenshot style
+    log_e = discord.Embed(
+        color=0xF59E0B,
+        description=(
+            f"## 💸  Tip Transaction\n"
+            f"👤 **From:** {interaction.user.mention} {interaction.user.id}\n"
+            f"👤 **To:** {user.mention} {user.id}\n"
+            f"💰 **Amount:** {format_amount(amt)}\n\n"
+            f"**📊 New Balances**\n"
+            f"{interaction.user.mention}: {format_amount(sender_bal)}\n"
+            f"{user.mention}: {format_amount(recv_bal)}\n\n"
+            f"**🎯 Wager Requirement Added**\n"
+            f"{user.mention} must wager: {format_amount(amt)}"
+        )
     )
     log_e.set_footer(text=now_ts())
     await send_tip_log(log_e)
@@ -5074,14 +5061,44 @@ class BaccaratView(BaseGameView):
             returned_val = "0"
 
         bac_net_str = f"+{format_amount(payout - self.bet)} 💎" if payout > self.bet else ("±0" if payout == self.bet else f"-{format_amount(self.bet)}")
+        # Build card display strings like screenshot: "2♣ A♥ = 3"
+        def _bac_hand_display(hand):
+            RANKS = {1:"A",2:"2",3:"3",4:"4",5:"5",6:"6",7:"7",8:"8",9:"9",10:"10",11:"J",12:"Q",13:"K"}
+            SUITS = ["♠","♥","♦","♣"]
+            parts = []
+            for card in hand:
+                if isinstance(card, tuple):
+                    r, s = card
+                else:
+                    r, s = card, random.choice(SUITS)
+                rank_str = RANKS.get(r % 13 or 13, str(r))
+                parts.append(f"{rank_str}{s}")
+            return " ".join(parts)
+        p_display = bac_str(ph)
+        b_display = bac_str(bh)
+        if is_push:
+            result_label = "It's a Tie!
+🤝 It's a tie!"
+        elif won:
+            result_label = f"**{bet_type} Wins!**
+🏆 {bet_type} wins this round!"
+        else:
+            result_label = f"**{winner} Wins!**
+🏦 {winner} wins this round!"
+
         result_embed = discord.Embed(
             color=color,
-            description=f"## 🃏  BACCARAT  {outcome_icon}"
+            description=(
+                f"## 🎴  Baccarat Game\n"
+                f"**Bet:** {format_amount(self.bet)} 💎\n"
+                f"**On:** {bet_type}\n"
+                f"**Result:** {bac_net_str}"
+            )
         )
-        result_embed.description += f"\n{result_desc(won, is_push, self.bet, payout)}"
-        result_embed.add_field(name="Player", value=f"`{bac_str(ph)}`",      inline=True)
-        result_embed.add_field(name="Banker", value=f"`{bac_str(bh)}`",      inline=True)
-        result_embed.add_field(name="Bet on", value=f"**{bet_type}**",        inline=True)
+        result_embed.add_field(name="Player",  value=f"{p_display} = {pt}", inline=True)
+        result_embed.add_field(name="Banker",  value=f"{b_display} = {bt}", inline=True)
+        result_embed.add_field(name="​",  value="​",              inline=True)
+        result_embed.add_field(name="​",  value=result_label,          inline=False)
         result_embed.set_thumbnail(url=await get_avatar(self.creator))
         _brand_embed(result_embed)
 
@@ -5265,27 +5282,25 @@ class BlackjackView(BaseGameView):
         player_bj   = is_blackjack(self.player_hand) and self.extra_bet == 0
         potential   = int(total_bet * 2.5) if player_bj else total_bet * 2
 
-        # Build card strings like screenshot: "6♣ 3♠"
         player_cards = bj_str(self.player_hand)
         dealer_cards = bj_str(self.dealer_hand, hide_dealer)
 
         embed = discord.Embed(
             color=C_GOLD,
-            title="🃏  Blackjack",
             description=(
+                f"## 🃏  Blackjack\n"
                 f"**Bet:** {format_amount(total_bet)} 💎\n"
                 f"**Potential Winnings:** {format_amount(potential)} 💎"
             )
         )
         embed.add_field(
             name="Your Hand:",
-            value=f"{player_cards}\nPlayer's Card Value: **{pt}**",
+            value=f"{player_cards}\nPlayer's Card Value: {pt}",
             inline=False
         )
-        dealer_val_display = f"**{dt}** + ?" if hide_dealer else f"**{bj_total(self.dealer_hand)}**"
         embed.add_field(
             name="Dealer's Hand:",
-            value=f"{dealer_cards}\nDealer's Card Value: **{dlabel}**",
+            value=f"{dealer_cards}\nDealer's Card Value: {dlabel}",
             inline=False
         )
         _brand_embed(embed)
@@ -7566,16 +7581,12 @@ class RPSView(BaseGameView):
 
 # ╔══════════════════════════════════════════════════════════════╗
 # ║                    SABPOT  —  PART 2 OF 2                    ║
-# ║  Run main_part1.py — this file is appended at runtime.       ║
-# ║  To run the full bot: python main_part1.py                   ║
+# ║  Paste this DIRECTLY below Part 1 in the same file.          ║
+# ║  UI REVAMP + Message Rewards: 500 msgs = 25M gems 💎         ║
+# ║  Spam warning: once per 15 minutes (not every 2 minutes)     ║
 # ╚══════════════════════════════════════════════════════════════╝
 # NOTE: This file continues directly from main_part1.py.
 # All imports, config, and shared utilities are defined there.
-
-# ╔══════════════════════════════════════════════════════════════╗
-# ║                    SABPOT  —  PART 2 OF 2                    ║
-# ║  Paste this DIRECTLY below Part 1 in the same file.          ║
-# ╚══════════════════════════════════════════════════════════════╝
 
 @bot.tree.command(name="rps", description="Play Rock Paper Scissors — chain wins to multiply your bet!")
 @app_commands.describe(bet="Bet amount e.g. 5k, 1M")
@@ -7760,15 +7771,15 @@ class MinesView(BaseGameView):
                 f"└─────────────────────────┘"
             )
         elif outcome in ("win", "cleared"):
-            title_line = "## 🏆  MINES — CASHOUT!" if outcome == "win" else "## 🏆  MINES — BOARD CLEARED!"
+            title_line = "## 🎉  VICTORY!" if outcome == "win" else "## 🏆  BOARD CLEARED!"
             stats = (
                 f"{title_line}\n"
-                f"┌─────────────────────────┐\n"
+                f"┌─────────────────────────────┐\n"
                 f"│ 💰 **Bet** • {format_amount(self.bet)} 💎\n"
                 f"│ 📊 **Multiplier** • {self.current_mult:.2f}x\n"
+                f"│ ✨ **Profit** • {profit_str} 💎\n"
                 f"│ 💎 **Gems Found** • {self.gems_found}/{gems_total}\n"
-                f"│ ✅ **Profit** • {profit_str} 💎\n"
-                f"└─────────────────────────┘"
+                f"└─────────────────────────────┘"
             )
         else:
             next_mult   = mines_calc_mult(self.mines, self.gems_found + 1)
@@ -13959,22 +13970,22 @@ async def pay_affiliate(conn, referral_id: int, bet: int):
 # ═══════════════════════════════════════════════════════════
 # MESSAGE REWARDS SYSTEM
 # ═══════════════════════════════════════════════════════════
-# Every 100 valid messages earns 10M gems, claimed via /redeemmessagerewards
+# Every 500 valid messages earns 25M gems 💎, claimed via /redeemmessagerewards
 # Anti-spam: 10s cooldown, no repeats, min 3 unique words, min 5 chars
 
-MESSAGE_REWARD_AMOUNT    = 100   # 1 gem display (100 units) per 100 messages
-MESSAGE_REWARD_EVERY     = 100
+MESSAGE_REWARD_AMOUNT    = 2_500_000_000  # 25M gems (internal units) per 500 messages
+MESSAGE_REWARD_EVERY     = 500
 MESSAGE_COOLDOWN_SECS    = 10
 MESSAGE_MIN_LENGTH       = 5
 MESSAGE_MIN_UNIQUE_WORDS = 3
 
-_msg_cooldowns: dict = {}   # user_id -> last counted timestamp
-_msg_last_text: dict = {}   # user_id -> last counted message
+_msg_cooldowns: dict = {}    # user_id -> last counted timestamp
+_msg_last_text: dict = {}    # user_id -> last counted message
 _msg_spam_strikes: dict = {} # user_id -> strike count
 _msg_dm_cooldown: dict = {}  # user_id -> last DM warning timestamp
 
-SPAM_STRIKE_THRESHOLD = 3    # warn after this many spam attempts in a row
-SPAM_DM_COOLDOWN_SECS = 60   # only send DM warning once per minute per user
+SPAM_STRIKE_THRESHOLD = 3       # warn after this many spam attempts in a row
+SPAM_DM_COOLDOWN_SECS = 900     # only send DM warning once per 15 minutes per user
 
 SPAM_REASONS = {
     "cooldown":    "sending messages too fast (10 second cooldown between counted messages)",
@@ -14054,7 +14065,7 @@ async def maybe_warn_spammer(user: discord.Member, reason: str):
     readable_reason = SPAM_REASONS.get(reason, reason)
     try:
         embed = discord.Embed(
-            title="✦  MESSAGE WARNING",
+            title="⚠️  Message Rewards Warning",
             description=(
                 f"Hey {user.mention}! Your recent messages are **not counting** toward your message rewards "
                 f"because you are **{readable_reason}**.\n\n"
@@ -14064,14 +14075,14 @@ async def maybe_warn_spammer(user: discord.Member, reason: str):
                 "• Not repeat your last message\n"
                 "• Not be sent faster than every **10 seconds**\n"
                 "• Not contain spammy repeated characters\n\n"
-                "Keep chatting naturally and you will earn **💎 1 point every 100 messages**!"
+                "Keep chatting naturally and you will earn **💎 25M gems every 500 messages**!\n"
+                "_(This warning won't be sent again for 15 minutes)_"
             ),
-            color=C_LOSS
+            color=C_WARN
         )
         _brand_embed(embed)
         await user.send(embed=embed)
         print(f"[MSG_REWARD] Warned {user.name} for spam ({reason})")
-        pass  # DMs closed
     except Exception as e:
         print(f"[MSG_REWARD] DM warning failed: {e}")
 
@@ -14125,10 +14136,10 @@ async def on_message(message: discord.Message):
         if hit_milestone:
             try:
                 note = discord.Embed(
-                    title="🎉 Message Milestone!",
+                    title="🎉  Message Milestone!",
                     description=(
-                        f"You've sent **{new_total}** messages!\n"
-                        f"Use `/redeemmessagerewards` to claim **{format_amount(MESSAGE_REWARD_AMOUNT)}** 💎!"
+                        f"🏆 You've sent **{new_total}** messages!\n\n"
+                        f"💎 Use `/redeemmessagerewards` to claim **{format_amount(MESSAGE_REWARD_AMOUNT)} gems**!"
                     ),
                     color=C_VIP
                 )
@@ -14436,7 +14447,7 @@ async def cmd_dmupdate(
     asyncio.create_task(_send_daily_dms(title, message, color))
 
 
-@bot.tree.command(name="redeemmessagerewards", description="Claim your pending message milestone rewards (1 pt per 100 messages).")
+@bot.tree.command(name="redeemmessagerewards", description="Claim your pending message milestone rewards (25M gems per 500 messages).")
 async def cmd_redeemmessagerewards(interaction: discord.Interaction):
     conn = await get_conn()
     try:
@@ -14453,7 +14464,7 @@ async def cmd_redeemmessagerewards(interaction: discord.Interaction):
             remaining = next_ms - total
             await interaction.response.send_message(
                 f"❌ No pending message rewards.\n"
-                f"You have **{total}** messages. **{remaining}** more until your next reward!",
+                f"You have **{total}** messages. **{remaining}** more until your next **💎 {format_amount(MESSAGE_REWARD_AMOUNT)} gem** reward!",
                 ephemeral=True
             )
             return
@@ -14475,13 +14486,19 @@ async def cmd_redeemmessagerewards(interaction: discord.Interaction):
         next_ms   = ((total2 // MESSAGE_REWARD_EVERY) + 1) * MESSAGE_REWARD_EVERY
         remaining = next_ms - total2
 
-        embed = discord.Embed(title="Message Rewards", color=C_VIP)
-        embed.add_field(name="🎁 Milestones Claimed", value=str(unclaimed),             inline=True)
-        embed.add_field(name="💎 Gems Earned",       value=format_amount(payout),       inline=True)
-        embed.add_field(name="📝 Total Messages",     value=str(total2),                 inline=True)
-        embed.add_field(name="Next Reward", value=f"**{remaining}** more messages needed",       inline=False)
+        embed = discord.Embed(
+            color=C_WIN,
+            description=(
+                f"## 🎉  Message Rewards Claimed!\n"
+                f"💎 **{format_amount(payout)} gems** added to your balance!\n\n"
+                f"📝 **Total messages:** {total2:,}\n"
+                f"🎁 **Milestones claimed:** {unclaimed}\n"
+                f"⏳ **Next reward in:** {remaining} more messages"
+            )
+        )
         embed.set_thumbnail(url=await get_avatar(interaction.user))
-        embed.set_footer(text="Keep chatting to earn more! (No spam though 😎)")
+        embed.set_footer(text="500 messages = 25M gems 💎  •  Keep chatting!")
+        _brand_embed(embed)
         await interaction.response.send_message(embed=embed)
 
     except Exception as e:
@@ -14513,18 +14530,20 @@ async def cmd_messages(interaction: discord.Interaction):
         next_ms       = ((total // MESSAGE_REWARD_EVERY) + 1) * MESSAGE_REWARD_EVERY
         remaining     = next_ms - total
 
-        embed = discord.Embed(title="Message Stats", color=C_VIP)
-        embed.add_field(name="📝 Total Messages",
-                        value=str(total), inline=True)
-        embed.add_field(name="💎 Total Earned",
-                        value=format_amount(total_claimed * MESSAGE_REWARD_AMOUNT), inline=True)
-        embed.add_field(name="⏳ Pending Rewards",
-                        value=f"{unclaimed}x (💎 {format_amount(unclaimed * MESSAGE_REWARD_AMOUNT)})" if unclaimed else "None",
-                        inline=True)
-        embed.add_field(name=f"Progress ({progress}/{MESSAGE_REWARD_EVERY})",
-                        value=f"`{bar}` — **{remaining}** messages to go", inline=False)
+        embed = discord.Embed(
+            color=C_VIP,
+            description=(
+                f"## 💬  Message Stats\n"
+                f"📝 **Total Messages:** {total:,}\n"
+                f"💎 **Total Earned:** {format_amount(total_claimed * MESSAGE_REWARD_AMOUNT)} gems\n"
+                f"⏳ **Pending Rewards:** {'None' if not unclaimed else f'{unclaimed}x = {format_amount(unclaimed * MESSAGE_REWARD_AMOUNT)} gems'}\n\n"
+                f"**Progress to next reward:** {progress}/{MESSAGE_REWARD_EVERY}\n"
+                f"`{bar}` — **{remaining}** messages to go"
+            )
+        )
         embed.set_thumbnail(url=await get_avatar(interaction.user))
-        embed.set_footer(text="10M gems every 100 messages  •  /redeemmessagerewards to claim")
+        embed.set_footer(text="500 messages = 25M gems 💎  •  /redeemmessagerewards to claim")
+        _brand_embed(embed)
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
     except Exception as e:
