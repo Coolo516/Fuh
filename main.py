@@ -1,7 +1,7 @@
 # ╔══════════════════════════════════════════════════════════════╗
-# ║                    SABPOT  —  PART 1 OF 2                    ║
+# ║                    RBXFLIP  —  PART 1 OF 2                    ║
 # ║  Paste this file first, then immediately paste Part 2 below. ║
-# ║  UI REVAMP: embeds match SABFlippy screenshot style          ║
+# ║  UI REVAMP: embeds match Rbxflip style          ║
 # ╚══════════════════════════════════════════════════════════════╝
 
 import discord
@@ -27,7 +27,7 @@ except ImportError:
     pass
 
 # ╔══════════════════════════════════════════════════════════════╗
-# ║               SABPOT CASINO BOT — SETUP NOTES               ║
+# ║               RBXFLIP — SETUP NOTES               ║
 # ║                                                              ║
 # ║  REQUIRED env variables (must set or bot won't start):      ║
 # ║    TOKEN        — Discord bot token                          ║
@@ -99,9 +99,11 @@ async def _load_channel_ids():
         print(f"[BOT] Channel IDs loaded from DB")
     except Exception as e:
         print(f"[BOT] Could not load channel IDs: {e}")
-ADMIN_ROLE_NAME      = "Operations Manager"
-STAFF_ROLE_NAME      = "Deposit Moderator"
+ADMIN_ROLE_NAME      = "Admin"
+STAFF_ROLE_NAME      = "Moderator"
 OWNER_ROLE_NAME      = "Owner"
+MANAGER_ROLE_NAME    = "Manager"
+TMOD_ROLE_NAME       = "t-Mod"
 BOT_HOUSE_WIN        = 0.525
 BJ_DEALER_STAND      = 17    # Dealer stands at this total (16=player friendly, 17=standard, 19=heavy edge)
 
@@ -112,24 +114,27 @@ _pool: asyncpg.Pool = None
 
 # Rank thresholds in internal units wagered (100 units = 1 pt = $0.01)
 RANK_DATA = [
-    (0,                  1_000_000_000,    "🐌", "Snail",       0x8B4513),   # 0 – 10M gems wagered
-    (1_000_000_000,      5_000_000_000,    "🥈", "Silver",      0xC0C0C0),   # 10M – 50M
-    (5_000_000_000,      10_000_000_000,   "🥇", "Gold",        0xFFD700),   # 50M – 100M
-    (10_000_000_000,     25_000_000_000,   "💿", "Platinum",    0xE5E4E2),   # 100M – 250M
-    (25_000_000_000,     50_000_000_000,   "💚", "Emerald",     0x50C878),   # 250M – 500M
-    (50_000_000_000,     100_000_000_000,  "🔴", "Ruby",        0x9B111E),   # 500M – 1B
-    (100_000_000_000,    250_000_000_000,  "🎰", "High Roller", 0xFF6600),   # 1B – 2.5B
-    (250_000_000_000,    500_000_000_000,  "🏆", "Legend",      0xFFD700),   # 2.5B – 5B
-    (500_000_000_000,    1_000_000_000_000,"🐋", "Whale",       0x1E90FF),   # 5B – 10B
-    (1_000_000_000_000,  10**18,           "👑", "Exclusive",   0xA855F7),   # 10B+
+    # (min_wagered_units, max_wagered_units, emoji, name, color_hex)
+    # 100 internal units = 1 gem displayed. Thresholds below are in units.
+    # 10M gems  = 1_000_000_000 units
+    (0,                   1_000_000_000,     "🥉", "Bronze",      0xCD7F32),   # 0 – 10M gems
+    (1_000_000_000,       5_000_000_000,     "🥈", "Silver",      0xC0C0C0),   # 10M – 50M
+    (5_000_000_000,       20_000_000_000,    "🥇", "Gold",        0xFFD700),   # 50M – 200M
+    (20_000_000_000,      60_000_000_000,    "💿", "Platinum",    0xE5E4E2),   # 200M – 600M
+    (60_000_000_000,      150_000_000_000,   "🔴", "Ruby",        0x9B111E),   # 600M – 1.5B
+    (150_000_000_000,     300_000_000_000,   "💚", "Emerald",     0x50C878),   # 1.5B – 3B
+    (300_000_000_000,     500_000_000_000,   "🎰", "High Roller", 0xFF6600),   # 3B – 5B
+    (500_000_000_000,     1_000_000_000_000, "🐋", "Whale",       0x1E90FF),   # 5B – 10B
+    (1_000_000_000_000,   10**18,            "🏆", "Legend",      0xFFD700),   # 15B+
 ]
 
-EXCLUSIVE_ROLE  = "👑 Exclusive"
-DIAMOND_ROLE    = "💎 Diamond Whale"
-VIP_ROOM_NAME   = "💎・vip-room"
-VIP_ROLE_NAME   = "💎 VIP"
-MEMBER_ROLE_NAME = "Member"          # Auto-assigned to everyone on join
-BOT_ROLE_NAME    = "Sabpot"       # Top-level bot management role — sits above all casino roles
+# Leaderboard-only roles — awarded by hourly rank loop, NOT shown in /rank wager display
+CHAMPION_ROLE     = "👑 Champion"      # Top 1 on leaderboard
+DIAMOND_WHALE_ROLE = "💎 Diamond Whale" # Top 2–3 on leaderboard
+MEMBER_ROLE_NAME     = "Member"          # Manually assigned after verification
+UNVERIFIED_ROLE_NAME = "Unverified"      # Auto-assigned to everyone on join
+BOT_ROLE_NAME        = "Rbxflip"        # Top-level bot management role — sits above all casino roles
+VERIFIED_ROLE_NAME   = "Verified"       # Auto-created verified role
 
 CARD_EMOJIS = {
     1: "🎲", 2: "⚽", 3: "3️⃣", 4: "4️⃣", 5: "5️⃣",
@@ -226,7 +231,7 @@ ALL_GAMES = {
 }
 
 ALLOWED_LOCK_ROLES = {
-    "Owner", "Operations Manager", "Deposit Moderator",
+    "Owner", "Admin", "Moderator",
     "Member", "Verified", "💎 VIP",
 }
 
@@ -236,7 +241,7 @@ def is_game_locked(game_key: str, member) -> bool:
         return False
     member_role_names = {r.name for r in member.roles}
     # Staff/admin/owner can always play even when locked
-    bypass_roles = {"Owner", "Operations Manager", "Deposit Moderator"}
+    bypass_roles = {"Owner", "Manager", "Admin", "Moderator", "t-Mod"}
     return not bool(member_role_names & bypass_roles)
 
 # ─── Daily reward ─────────────────────────────────────────────
@@ -278,7 +283,7 @@ def parse_amount(text: str) -> Optional[int]:
 # ║                VORTEX  ·  DESIGN SYSTEM  v2                 ║
 # ╚══════════════════════════════════════════════════════════════╝
 # PALETTE — deep jewel tones, high contrast
-C_GOLD   = 0xA855F7   # neon purple   — brand (Sabpot logo)
+C_GOLD   = 0xA855F7   # neon purple   — brand (Rbxflip logo)
 C_WIN    = 0x7C3AED   # deep violet   — win
 C_LOSS   = 0xFC3D5F   # crimson       — loss
 C_PUSH   = 0x6D28D9   # indigo        — push/tie
@@ -287,10 +292,10 @@ C_VIP    = 0xE879F9   # neon magenta  — VIP
 C_WARN   = 0xF59E0B   # amber         — warning
 C_DARK   = 0x1A1025   # deep dark     — inactive
 
-CASINO_MARK = "SABPOT  ╱  sabpot.gg"
-# LOGO_URL: Upload your Sabpot purple pfp to Discord, right-click → Copy Link, paste below
+CASINO_MARK = "RBXFLIP  ╱  rbxflip.gg"
+# LOGO_URL: Upload your Rbxflip logo to Discord, right-click → Copy Link, paste below
 # OR set env var LOGO_URL to that URL
-LOGO_URL = os.getenv("LOGO_URL", "")  # Paste your Sabpot logo URL here or set LOGO_URL env var
+LOGO_URL = os.getenv("LOGO_URL", "")  # Paste your Rbxflip logo URL here or set LOGO_URL env var
 # ── Coinflip GIF URLs ────────────────────────────────────────────────────────
 # HOW TO GET YOUR GIF URLs:
 #   1. Go to any Discord server or DM
@@ -309,8 +314,8 @@ COINFLIP_SPINNING_GIF = os.getenv("COINFLIP_SPINNING_GIF", "")  # Optional spinn
 
 
 def _brand_embed(embed: discord.Embed) -> discord.Embed:
-    """Apply Sabpot branding: logo as small author icon + footer."""
-    embed.set_author(name="🎲 SABPOT", icon_url=LOGO_URL)
+    """Apply Rbxflip branding: logo as small author icon + footer."""
+    embed.set_author(name="✦ RBXFLIP", icon_url=LOGO_URL if LOGO_URL else None)
     embed.set_footer(text=CASINO_MARK)
     return embed
 
@@ -338,7 +343,7 @@ def _row(*cols, width: int = 18) -> str:
     return "  ".join(str(c).ljust(width) for c in cols)
 
 def game_header(name: str, bet: int, extra: str = "") -> str:
-    """Consistent game description header — Sabpot purple neon style."""
+    """Consistent game description header."""
     lines = [f"```ansi\n\u001b[35m  {name.upper():<16}\u001b[0m  {format_amount(bet):>14}", "```"]
     if extra:
         lines.insert(1, f"  {extra[:32]}")
@@ -474,13 +479,14 @@ async def require_linked(interaction: discord.Interaction) -> bool:
     if row:
         return True
     e = discord.Embed(
-        title="🔗  Link Required",
+        color=C_LOSS,
         description=(
-            "You must link your **Roblox account** before using any commands.\n\n"
-            "> Use `/link <username>` to connect your account.\n"
-            "> Your Roblox avatar will then appear on all game embeds!"
-        ),
-        color=C_LOSS
+            "## 🔗  LINK REQUIRED\n"
+            "You need to link your **Roblox account** before playing.\n"
+            "─────────────────────────────\n"
+            "> `/link <username>` — connect your account\n"
+            "> Your avatar will appear on all game embeds"
+        )
     )
     _brand_embed(e)
     try:
@@ -637,6 +643,13 @@ async def init_db():
                 reward_amt   BIGINT NOT NULL DEFAULT 0,
                 wagered_so_far BIGINT NOT NULL DEFAULT 0,
                 req_met      BOOLEAN NOT NULL DEFAULT FALSE
+            )
+        """)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS suspended_invite_rewards (
+                user_id      TEXT PRIMARY KEY,
+                suspended_at TEXT NOT NULL DEFAULT '',
+                suspended_by TEXT NOT NULL DEFAULT ''
             )
         """)
         await conn.execute("""
@@ -930,9 +943,11 @@ async def log_transaction(conn, user_id: int, action: str, amount: int, note: st
 # ═══════════════════════════════════════════════════════════
 
 async def ensure_rank_roles(guild: discord.Guild):
+    """Ensure all wager-threshold rank roles exist.
+    Champion and Diamond Whale are leaderboard-only and managed by the hourly loop."""
     if not guild:
         return
-    # Create wagered-threshold roles
+    # Create wagered-threshold roles only
     for low, high, emoji, name, color in RANK_DATA:
         role_name = f"{emoji} {name}"
         existing = discord.utils.get(guild.roles, name=role_name)
@@ -959,8 +974,8 @@ async def ensure_rank_roles(guild: discord.Guild):
                     await existing.edit(**edits)
                 except Exception as e:
                     print(f"[ERROR] {type(e).__name__}: {e}")
-    # Create dynamic roles (Exclusive + Diamond Whale)
-    for role_name, color in [(EXCLUSIVE_ROLE, 0x9400D3), (DIAMOND_ROLE, 0xB9F2FF)]:
+    # Ensure leaderboard roles exist too (Champion top 1, Diamond Whale top 2-3)
+    for role_name, color in [(CHAMPION_ROLE, 0xFFD700), (DIAMOND_WHALE_ROLE, 0xB9F2FF)]:
         existing = discord.utils.get(guild.roles, name=role_name)
         if not existing:
             try:
@@ -968,9 +983,9 @@ async def ensure_rank_roles(guild: discord.Guild):
                     name=role_name, color=discord.Color(color),
                     hoist=True, mentionable=False,
                     permissions=NO_PING_PERMISSIONS,
-                    reason="Auto-created dynamic rank role"
+                    reason="Auto-created leaderboard role"
                 )
-                print(f"[ROLES] Created dynamic role: {role_name} in {guild.name}")
+                print(f"[ROLES] Created leaderboard role: {role_name} in {guild.name}")
             except Exception as e:
                 print(f"[ROLES] Failed to create {role_name}: {e}")
         else:
@@ -1038,7 +1053,7 @@ async def strip_all_ping_perms(guild: discord.Guild):
     """
     if not guild:
         return
-    admin_role_names = {ADMIN_ROLE_NAME, OWNER_ROLE_NAME}
+    admin_role_names = {ADMIN_ROLE_NAME, OWNER_ROLE_NAME, MANAGER_ROLE_NAME, TMOD_ROLE_NAME}
     for role in guild.roles:
         # Skip roles that have administrator (they intentionally have all perms)
         if role.permissions.administrator:
@@ -1046,8 +1061,8 @@ async def strip_all_ping_perms(guild: discord.Guild):
         # Skip the bot management role itself
         if role.name == BOT_ROLE_NAME:
             continue
-        # Skip roles with "admin" in the name (catch custom admin roles)
-        if any(r in role.name.lower() for r in ["admin", "owner", "mod"]) and role.name not in {STAFF_ROLE_NAME, MEMBER_ROLE_NAME}:
+        # Skip staff roles by name
+        if role.name in {OWNER_ROLE_NAME, MANAGER_ROLE_NAME, ADMIN_ROLE_NAME, STAFF_ROLE_NAME, TMOD_ROLE_NAME}:
             continue
         await _strip_ping_perms(role)
 
@@ -1090,13 +1105,13 @@ async def ensure_bot_role(guild: discord.Guild) -> discord.Role | None:
             owner = guild.owner
             if owner:
                 embed = discord.Embed(
-                    title="🎲  SABPOT — Role Setup Required",
+                    title="✦  RBXFLIP — Action Required",
                     description=(
-                        f"Sabpot has created the **{BOT_ROLE_NAME}** role.\n\n"
-                        f"**Action needed:** Please move the **{BOT_ROLE_NAME}** role to the "
+                        f"Rbxflip has created the **{BOT_ROLE_NAME}** role.\n\n"
+                        f"**Action needed:** Move **{BOT_ROLE_NAME}** to the "
                         f"**top of your role list** in Server Settings → Roles so the bot can "
-                        f"manage all casino roles properly.\n\n"
-                        f"This only needs to be done once."
+                        f"manage all roles properly.\n\n"
+                        f"This only needs to be done once. ✦"
                     ),
                     color=C_GOLD
                 )
@@ -1143,9 +1158,27 @@ async def assign_member_role(member: discord.Member):
         except Exception as e:
             print(f"[ROLES] Could not assign Member role to {member}: {e}")
 
+async def ensure_unverified_role(guild: discord.Guild) -> discord.Role | None:
+    """Ensure the Unverified role exists; create it if missing."""
+    existing = discord.utils.get(guild.roles, name=UNVERIFIED_ROLE_NAME)
+    if existing:
+        return existing
+    try:
+        role = await guild.create_role(
+            name=UNVERIFIED_ROLE_NAME,
+            color=discord.Color.from_rgb(100, 100, 100),
+            hoist=False,
+            reason="Auto-created Unverified role"
+        )
+        print(f"[ROLES] Created Unverified role in {guild.name}")
+        return role
+    except Exception as e:
+        print(f"[ROLES] Failed to create Unverified role in {guild.name}: {e}")
+        return None
+
 async def ensure_staff_role(guild: discord.Guild) -> discord.Role | None:
     """
-    Ensure the Deposit Moderator role exists in the guild.
+    Ensure the Moderator role exists in the guild.
     Creates it if missing, returns the role object.
     """
     if not guild:
@@ -1159,7 +1192,7 @@ async def ensure_staff_role(guild: discord.Guild) -> discord.Role | None:
             color=discord.Color(C_BLUE),   # Deep sky blue — distinct from Admin gold
             hoist=True,
             mentionable=True,
-            reason="Auto-created Deposit Moderator role"
+            reason="Auto-created Moderator role"
         )
         print(f"[ROLES] Created staff role in {guild.name}")
         return role
@@ -1213,178 +1246,75 @@ async def update_dynamic_ranks():
     conn = await get_conn()
     try:
         rows = await conn.fetch(
-            "SELECT user_id, wagered FROM users ORDER BY wagered DESC LIMIT 10"
+            "SELECT user_id, wagered FROM users ORDER BY wagered DESC LIMIT 3"
         )
     finally:
         await release_conn(conn)
 
-    top10_ids = [int(r["user_id"]) for r in rows]
-    top1_id   = top10_ids[0] if top10_ids else None
+    top3_ids   = [int(r["user_id"]) for r in rows]
+    top1_id    = top3_ids[0] if len(top3_ids) >= 1 else None
+    top2_3_ids = set(top3_ids[1:3])
 
     for guild in bot.guilds:
-        # Ensure dynamic roles exist
-        exclusive_role = discord.utils.get(guild.roles, name=EXCLUSIVE_ROLE)
-        if not exclusive_role:
+        # Ensure leaderboard roles exist
+        champion_role = discord.utils.get(guild.roles, name=CHAMPION_ROLE)
+        if not champion_role:
             try:
-                exclusive_role = await guild.create_role(
-                    name=EXCLUSIVE_ROLE, color=discord.Color(0x9400D3),
+                champion_role = await guild.create_role(
+                    name=CHAMPION_ROLE, color=discord.Color(0xFFD700),
                     hoist=True, permissions=NO_PING_PERMISSIONS,
-                    reason="Auto-created dynamic rank")
+                    reason="Auto-created leaderboard role")
             except Exception as e:
-
                 print(f"[ERROR] {type(e).__name__}: {e}")
-                exclusive_role = None
+                champion_role = None
 
-        diamond_role = discord.utils.get(guild.roles, name=DIAMOND_ROLE)
-        if not diamond_role:
+        diamond_whale_role = discord.utils.get(guild.roles, name=DIAMOND_WHALE_ROLE)
+        if not diamond_whale_role:
             try:
-                diamond_role = await guild.create_role(
-                    name=DIAMOND_ROLE, color=discord.Color(C_VIP),
+                diamond_whale_role = await guild.create_role(
+                    name=DIAMOND_WHALE_ROLE, color=discord.Color(0xB9F2FF),
                     hoist=True, permissions=NO_PING_PERMISSIONS,
-                    reason="Auto-created dynamic rank")
+                    reason="Auto-created leaderboard role")
             except Exception as e:
-
                 print(f"[ERROR] {type(e).__name__}: {e}")
-                diamond_role = None
+                diamond_whale_role = None
 
         # Update all members
         for member in guild.members:
             uid = member.id
-            in_top10 = uid in top10_ids
-            is_top1  = uid == top1_id
+            is_top1   = uid == top1_id
+            is_top2_3 = uid in top2_3_ids
 
-            # Diamond Whale
-            if diamond_role:
-                if is_top1 and diamond_role not in member.roles:
+            # Champion — top 1 only
+            if champion_role:
+                if is_top1 and champion_role not in member.roles:
                     try:
-                        await member.add_roles(diamond_role, reason="Top 1 wagered")
+                        await member.add_roles(champion_role, reason="Top 1 leaderboard")
                     except Exception as e:
-
                         print(f"[ERROR] {type(e).__name__}: {e}")
-                        pass
-                elif not is_top1 and diamond_role in member.roles:
+                elif not is_top1 and champion_role in member.roles:
                     try:
-                        await member.remove_roles(diamond_role, reason="No longer top 1")
+                        await member.remove_roles(champion_role, reason="No longer top 1")
                     except Exception as e:
-
                         print(f"[ERROR] {type(e).__name__}: {e}")
-                        pass
 
-            # Exclusive (top 10 but not top 1 — top 1 gets Diamond instead)
-            if exclusive_role:
-                should_have = in_top10 and not is_top1
-                has_role    = exclusive_role in member.roles
-                if should_have and not has_role:
+            # Diamond Whale — top 2 and 3
+            if diamond_whale_role:
+                if is_top2_3 and diamond_whale_role not in member.roles:
                     try:
-                        await member.add_roles(exclusive_role, reason="Top 10 wagered")
+                        await member.add_roles(diamond_whale_role, reason="Top 2-3 leaderboard")
                     except Exception as e:
-
                         print(f"[ERROR] {type(e).__name__}: {e}")
-                        pass
-                elif not should_have and has_role:
+                elif not is_top2_3 and diamond_whale_role in member.roles:
                     try:
-                        await member.remove_roles(exclusive_role, reason="No longer top 10")
+                        await member.remove_roles(diamond_whale_role, reason="No longer top 2-3")
                     except Exception:
                         pass
 
-    print(f"[RANKS] Dynamic rank update complete. Top1: {top1_id}, Top10: {top10_ids}")
-    # VIP room is now updated separately every minute via vip_room_minute_loop
+    print(f"[RANKS] Leaderboard role update complete. Champion: {top1_id}, Diamond Whale: {top2_3_ids}")
 
 
-async def _update_vip_room():
-    """Give top 5 depositors access to the VIP room channel. Remove access from those who dropped out."""
-    conn = await get_conn()
-    try:
-        rows = await conn.fetch(
-            "SELECT user_id FROM users ORDER BY total_deposited DESC LIMIT 5"
-        )
-    finally:
-        await release_conn(conn)
-
-    top5_ids = [int(r["user_id"]) for r in rows]
-
-    for guild in bot.guilds:
-        # Ensure VIP role exists
-        vip_role = discord.utils.get(guild.roles, name=VIP_ROLE_NAME)
-        if not vip_role:
-            try:
-                vip_role = await guild.create_role(
-                    name=VIP_ROLE_NAME,
-                    color=discord.Color(C_VIP),
-                    hoist=True,
-                    permissions=NO_PING_PERMISSIONS,
-                    reason="Auto-created VIP role"
-                )
-            except Exception as e:
-                print(f"[VIP] Could not create VIP role: {e}")
-                continue
-
-        # Ensure VIP room channel exists
-        vip_channel = discord.utils.get(guild.text_channels, name=VIP_ROOM_NAME.replace("・", "-").lower())
-        if not vip_channel:
-            # Try finding by name variation
-            vip_channel = discord.utils.get(guild.text_channels, name="💎・vip-room")
-        if not vip_channel:
-            try:
-                admin_role = discord.utils.get(guild.roles, name=ADMIN_ROLE_NAME)
-                overwrites = {
-                    guild.default_role: discord.PermissionOverwrite(read_messages=False),
-                    guild.me:           discord.PermissionOverwrite(read_messages=True, send_messages=True),
-                    vip_role:           discord.PermissionOverwrite(read_messages=True, send_messages=True),
-                }
-                if admin_role:
-                    overwrites[admin_role] = discord.PermissionOverwrite(read_messages=True, send_messages=True)
-                vip_channel = await guild.create_text_channel(
-                    name="💎・vip-room",
-                    overwrites=overwrites,
-                    topic="Exclusive VIP lounge — top 5 depositors only 👑"
-                )
-                await vip_channel.send(embed=discord.Embed(
-                    title="VIP Room",
-                    description="This is an exclusive channel for the **top 5 depositors** of Sabpot.\nOnly the highest rollers get access here.",
-                    color=C_VIP
-                ))
-                print(f"[VIP] Created VIP room in {guild.name}")
-            except Exception as e:
-                print(f"[VIP] Could not create VIP channel: {e}")
-
-        # Update VIP role assignments
-        for member in guild.members:
-            uid       = member.id
-            in_top5   = uid in top5_ids
-            has_role  = vip_role in member.roles
-
-            if in_top5 and not has_role:
-                try:
-                    await member.add_roles(vip_role, reason="Top 5 depositor — VIP access")
-                    if vip_channel:
-                        await vip_channel.send(
-                            embed=discord.Embed(
-                                title="New VIP Member",
-                                description=f"Welcome to the VIP room, {member.mention}! You're one of the top 5 depositors.",
-                                color=C_VIP
-                            )
-                        )
-                    # DM the new VIP
-                    try:
-                        await member.send(embed=discord.Embed(
-                            title="VIP Unlocked",
-                            description="You've earned access to the **exclusive VIP room** as one of the top 5 depositors at Sabpot!",
-                            color=C_VIP
-                        ))
-                    except Exception as e:
-
-                        pass
-                except Exception as e:
-                    print(f"[VIP] Could not add role to {member}: {e}")
-
-            elif not in_top5 and has_role:
-                try:
-                    await member.remove_roles(vip_role, reason="No longer in top 5 depositors")
-                except Exception as e:
-                    print(f"[VIP] Could not remove role from {member}: {e}")
-
-    print(f"[VIP] Updated. Top 5 depositors: {top5_ids}")
+# Top-5-depositor VIP room removed. VIP rooms are now user-created via /createviproom (70M balance minimum).
 
 # ═══════════════════════════════════════════════════════════
 # BOT SETUP
@@ -1398,6 +1328,12 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 
 
 
+async def channel_cleanup_loop():
+    """Stub — placeholder for future channel cleanup logic."""
+    await bot.wait_until_ready()
+    while not bot.is_closed():
+        await asyncio.sleep(3600)
+
 async def hourly_rank_loop():
     """Background task — updates Exclusive and Diamond Whale roles every hour."""
     await bot.wait_until_ready()
@@ -1408,39 +1344,20 @@ async def hourly_rank_loop():
             print(f"[RANKS] Hourly rank update error: {e}")
         await asyncio.sleep(3600)  # 1 hour
 
-async def vip_room_minute_loop():
-    """Background task — updates top-5-depositor VIP room every 60 seconds."""
-    await bot.wait_until_ready()
-    await asyncio.sleep(10)  # brief startup delay
-    while not bot.is_closed():
-        try:
-            await _update_vip_room()
-        except Exception as e:
-            print(f"[VIP] Minute loop error: {e}")
-        await asyncio.sleep(60)  # every minute
 
 async def _bootstrap_member_roles():
-    """One-time startup task — give the Member role to every existing guild member,
-    and strip @everyone/@here ping perms from all non-admin roles."""
+    """One-time startup task — ensure required roles exist and strip @everyone/@here
+    ping perms from all non-admin roles. Member role is NOT auto-assigned; it is
+    granted manually after verification. New joiners receive Unverified automatically."""
     await bot.wait_until_ready()
     for guild in bot.guilds:
         try:
             # Strip ping perms from every non-admin role in the guild
             await strip_all_ping_perms(guild)
-            role = await ensure_member_role(guild)
-            if not role:
-                continue
-            assigned = 0
-            for member in guild.members:
-                if not member.bot and role not in member.roles:
-                    try:
-                        await member.add_roles(role, reason="Bootstrap: auto Member role")
-                        assigned += 1
-                        await asyncio.sleep(0.3)  # rate limit friendly
-                    except Exception as e:
-                        print(f"[ROLES] Bootstrap assign failed for {member}: {e}")
-            if assigned:
-                print(f"[ROLES] Bootstrapped Member role: {assigned} members in {guild.name}")
+            # Ensure both roles exist in the server (but don't assign them)
+            await ensure_member_role(guild)
+            await ensure_unverified_role(guild)
+            print(f"[ROLES] Bootstrap complete for {guild.name} — Member/Unverified roles ensured, Member NOT auto-assigned")
         except Exception as e:
             print(f"[ROLES] Bootstrap error in {guild.name}: {e}")
 
@@ -1546,36 +1463,31 @@ async def on_ready():
         print(f"[BOT] Could not load CB nerf level: {e}")
     await _load_channel_ids()
     asyncio.create_task(hourly_rank_loop())
-    asyncio.create_task(vip_room_minute_loop())
     asyncio.create_task(_migrate_existing_balances())
     asyncio.create_task(_migrate_add_deposited_column())
     asyncio.create_task(_bootstrap_member_roles())
     asyncio.create_task(_snapshot_all_members())
     asyncio.create_task(_daily_dm_loop())
     asyncio.create_task(_auto_create_roles())
+    asyncio.create_task(_auto_create_channels())
     asyncio.create_task(channel_cleanup_loop())
 
 async def _auto_create_roles():
-    """Auto-create all required roles on startup if they don't exist yet."""
+    """Auto-create only the required staff/member roles on startup if they don't exist yet.
+    Roles created: t-Mod, Moderator, Admin, Manager, Owner, Unverified, Member.
+    Unverified is auto-assigned on join; Member is manually assigned after verification."""
     await asyncio.sleep(3)
     guild = bot.get_guild(GUILD_ID)
     if not guild:
         return
     roles_to_create = [
-        (OWNER_ROLE_NAME,       discord.Color.from_rgb(255, 215, 0),    True),
-        (ADMIN_ROLE_NAME,       discord.Color.from_rgb(255, 100, 0),    True),
-        (STAFF_ROLE_NAME,       discord.Color.from_rgb(100, 180, 255),  False),
-        (VIP_ROLE_NAME,         discord.Color.from_rgb(206, 147, 216),  True),
-        (VERIFIED_ROLE_NAME,    discord.Color.from_rgb(67, 234, 128),   False),
-        (MEMBER_ROLE_NAME,      discord.Color.from_rgb(150, 150, 150),  False),
-        ("🪨 Bronze",           discord.Color.from_rgb(170, 100, 50),   False),
-        ("🥈 Silver",           discord.Color.from_rgb(180, 180, 180),  False),
-        ("🥇 Gold",             discord.Color.from_rgb(255, 200, 0),    False),
-        ("💎 Diamond",          discord.Color.from_rgb(100, 220, 255),  False),
-        ("👑 Platinum",         discord.Color.from_rgb(220, 180, 255),  False),
-        ("🔱 Elite",            discord.Color.from_rgb(255, 80, 80),    False),
-        ("💎 Diamond Whale",    discord.Color.from_rgb(0, 207, 255),    True),
-        ("👑 Exclusive",        discord.Color.from_rgb(148, 0, 211),    True),
+        (OWNER_ROLE_NAME,       discord.Color.from_rgb(255, 215, 0),    True),   # Owner
+        (MANAGER_ROLE_NAME,     discord.Color.from_rgb(255, 140, 0),    True),   # Manager
+        (ADMIN_ROLE_NAME,       discord.Color.from_rgb(255, 100, 0),    True),   # Admin
+        (STAFF_ROLE_NAME,       discord.Color.from_rgb(100, 180, 255),  True),   # Moderator
+        (TMOD_ROLE_NAME,        discord.Color.from_rgb(120, 200, 120),  True),   # t-Mod
+        (MEMBER_ROLE_NAME,      discord.Color.from_rgb(150, 150, 150),  False),  # Member (manually assigned)
+        (UNVERIFIED_ROLE_NAME,  discord.Color.from_rgb(100, 100, 100),  False),  # Unverified (auto on join)
     ]
     created = []
     for name, color, hoist in roles_to_create:
@@ -1600,7 +1512,7 @@ async def _enforce_bot_role_position(guild: discord.Guild):
     bot_member = guild.me
     if not bot_member:
         return
-    management_role_names = {BOT_ROLE_NAME, OWNER_ROLE_NAME, ADMIN_ROLE_NAME, STAFF_ROLE_NAME, VIP_ROLE_NAME}
+    management_role_names = {BOT_ROLE_NAME, OWNER_ROLE_NAME, MANAGER_ROLE_NAME, ADMIN_ROLE_NAME, STAFF_ROLE_NAME, TMOD_ROLE_NAME}
     management_roles = [r for r in guild.roles if r.name in management_role_names and r != bot_member.top_role]
     if not management_roles:
         return
@@ -1621,10 +1533,181 @@ async def _enforce_bot_role_position(guild: discord.Guild):
 
 
 async def _auto_create_channels():
-    """Channel auto-creation is disabled. Channel IDs are loaded from the DB."""
+    """Auto-create the full server channel layout on startup if channels don't exist.
+    Permissions:
+      - Most channels: Owner + Manager can read/write. Everyone else read-only or locked.
+      - Gambling rooms: Members can type. Unverified cannot see.
+      - Staff channels: Staff roles only.
+      - @everyone: locked out of everything by default unless explicitly granted.
+    """
     await asyncio.sleep(5)
     await _load_channel_ids()
-    print("[SETUP] Channel IDs loaded from DB (auto channel creation is disabled)")
+
+    for guild in bot.guilds:
+        try:
+            await _setup_guild_channels(guild)
+        except Exception as e:
+            print(f"[SETUP] Channel setup error in {guild.name}: {e}")
+
+async def _setup_guild_channels(guild: discord.Guild):
+    """Create all channels and categories for a guild if they don't already exist."""
+
+    # ── Fetch roles ──────────────────────────────────────────────────────────
+    def role(name): return discord.utils.get(guild.roles, name=name)
+
+    everyone       = guild.default_role
+    owner_role     = role(OWNER_ROLE_NAME)
+    manager_role   = role(MANAGER_ROLE_NAME)
+    admin_role     = role(ADMIN_ROLE_NAME)
+    mod_role       = role(STAFF_ROLE_NAME)
+    tmod_role      = role(TMOD_ROLE_NAME)
+    member_role    = role(MEMBER_ROLE_NAME)
+    unverified_role = role(UNVERIFIED_ROLE_NAME)
+    bot_member     = guild.me
+
+    # ── Permission helpers ───────────────────────────────────────────────────
+    LOCK    = discord.PermissionOverwrite(read_messages=False, send_messages=False)
+    VISIBLE = discord.PermissionOverwrite(read_messages=True,  send_messages=False)  # read only
+    FULL    = discord.PermissionOverwrite(read_messages=True,  send_messages=True)
+    BOT_OW  = discord.PermissionOverwrite(read_messages=True,  send_messages=True, manage_messages=True)
+
+    def staff_full(*roles):
+        """Overwrites dict: everyone locked, listed roles get full access, bot gets full."""
+        ow = {everyone: LOCK, bot_member: BOT_OW}
+        for r in roles:
+            if r: ow[r] = FULL
+        return ow
+
+    def announce_ow():
+        """Owner/Manager can post. Everyone else read-only (members can react)."""
+        ow = {everyone: LOCK, bot_member: BOT_OW}
+        if owner_role:   ow[owner_role]   = FULL
+        if manager_role: ow[manager_role] = FULL
+        if admin_role:   ow[admin_role]   = VISIBLE
+        if mod_role:     ow[mod_role]     = VISIBLE
+        if tmod_role:    ow[tmod_role]    = VISIBLE
+        if member_role:  ow[member_role]  = VISIBLE
+        return ow
+
+    def read_only_ow():
+        """Owner/Manager write. All staff + members read. Unverified locked."""
+        ow = announce_ow()
+        return ow
+
+    def chat_ow():
+        """Members can chat. Unverified locked out."""
+        ow = {everyone: LOCK, bot_member: BOT_OW}
+        if owner_role:    ow[owner_role]    = FULL
+        if manager_role:  ow[manager_role]  = FULL
+        if admin_role:    ow[admin_role]    = FULL
+        if mod_role:      ow[mod_role]      = FULL
+        if tmod_role:     ow[tmod_role]     = FULL
+        if member_role:   ow[member_role]   = FULL
+        return ow
+
+    def gambling_ow():
+        """Members can gamble. Unverified locked. Staff can see."""
+        return chat_ow()
+
+    def staff_only_ow(*roles):
+        """Only listed staff roles + Owner/Manager. Everyone else locked."""
+        ow = {everyone: LOCK, bot_member: BOT_OW}
+        if owner_role:   ow[owner_role]   = FULL
+        if manager_role: ow[manager_role] = FULL
+        for r in roles:
+            if r: ow[r] = FULL
+        return ow
+
+    def vip_category_ow():
+        """VIP category — locked to everyone, rooms created inside by bot."""
+        ow = {everyone: LOCK, bot_member: BOT_OW}
+        if owner_role:   ow[owner_role]   = FULL
+        if manager_role: ow[manager_role] = FULL
+        return ow
+
+    # ── Category + channel layout ────────────────────────────────────────────
+    # Format: (category_name, category_overwrites, [
+    #   (channel_name, topic, overwrites, is_voice)
+    # ])
+    layout = [
+        ("📋 RULES", staff_full(owner_role, manager_role), [
+            ("📖｜rules", "Read the rules before participating.", read_only_ow(), False),
+        ]),
+        ("❗ IMPORTANT", staff_full(owner_role, manager_role), [
+            ("📣｜announcements",     "Server announcements.",           announce_ow(), False),
+            ("🤖｜bot-announcements", "Bot updates and notifications.",  announce_ow(), False),
+            ("🎊｜giveaways",         "Giveaway announcements.",         announce_ow(), False),
+            ("✅｜are-we-legit",      "Proof of legitimacy.",            read_only_ow(), False),
+        ]),
+        ("💼 Extra", staff_full(owner_role, manager_role), [
+            ("🎁｜tips",           "Tips and tricks.",          chat_ow(),      False),
+            ("⭐｜rain",            "Rain rewards.",             chat_ow(),      False),
+            ("🏷️｜promo-codes",    "Promo codes.",              read_only_ow(), False),
+            ("💜｜boost-rewards",  "Server boost rewards.",     read_only_ow(), False),
+            ("📤｜withdrawals",    "Withdrawal requests.",      chat_ow(),      False),
+        ]),
+        ("💬 Chat", staff_full(owner_role, manager_role), [
+            ("🗨️｜general", "General chat.",    chat_ow(),  False),
+            ("🖼️｜media",   "Share media.",     chat_ow(),  False),
+            ("🤝｜vouch",   "Vouch for staff.", chat_ow(),  False),
+        ]),
+        ("👑 VIP GAMBLING", vip_category_ow(), [
+            # No fixed channels — private rooms created here via /createviproom
+        ]),
+        ("🎰 Gambling", staff_full(owner_role, manager_role), [
+            ("🏁｜flag-competition", "Flag competition channel.", gambling_ow(), False),
+            ("🎲｜room-1",           "Gambling room 1.",          gambling_ow(), False),
+            ("🎲｜room-2",           "Gambling room 2.",          gambling_ow(), False),
+            ("🤡｜hall-of-shame",    "Hall of shame.",            chat_ow(),     False),
+        ]),
+        ("⚔️ SABPvp", staff_full(owner_role, manager_role), [
+            ("🔷｜coinflip",    "PvP coinflip duels.",    gambling_ow(), False),
+            ("🤖｜create-game", "Create a PvP game.",     gambling_ow(), False),
+        ]),
+        ("🔊 Voice Channels", staff_full(owner_role, manager_role), [
+            ("General", None, chat_ow(), True),
+        ]),
+        ("🔒 Staff", staff_only_ow(admin_role, mod_role, tmod_role), [
+            ("🛡️｜staff-chat",  "Staff only chat.",    staff_only_ow(admin_role, mod_role, tmod_role), False),
+            ("📋｜mod-logs",    "Moderation logs.",    staff_only_ow(admin_role, mod_role),             False),
+        ]),
+    ]
+
+    # ── Create categories and channels ───────────────────────────────────────
+    existing_categories = {c.name: c for c in guild.categories}
+    existing_text       = {c.name: c for c in guild.text_channels}
+    existing_voice      = {c.name: c for c in guild.voice_channels}
+
+    for cat_name, cat_ow, channels in layout:
+        # Get or create category
+        if cat_name not in existing_categories:
+            try:
+                cat = await guild.create_category(cat_name, overwrites=cat_ow)
+                print(f"[SETUP] Created category: {cat_name}")
+            except Exception as e:
+                print(f"[SETUP] Failed to create category '{cat_name}': {e}")
+                continue
+        else:
+            cat = existing_categories[cat_name]
+
+        # Create channels inside category
+        for ch_name, topic, ch_ow, is_voice in channels:
+            existing_pool = existing_voice if is_voice else existing_text
+            if ch_name not in existing_pool:
+                try:
+                    if is_voice:
+                        await guild.create_voice_channel(ch_name, category=cat, overwrites=ch_ow)
+                    else:
+                        await guild.create_text_channel(
+                            ch_name, category=cat, topic=topic or "", overwrites=ch_ow
+                        )
+                    print(f"[SETUP] Created {'voice' if is_voice else 'text'} channel: {ch_name}")
+                except Exception as e:
+                    print(f"[SETUP] Failed to create channel '{ch_name}': {e}")
+
+    # ── Save channel IDs to DB ───────────────────────────────────────────────
+    await _load_channel_ids()
+    print(f"[SETUP] Channel setup complete for {guild.name}")
 
 async def _migrate_add_deposited_column():
     """One-time migration: add missing columns and tables to existing DBs."""
@@ -1729,17 +1812,8 @@ async def on_guild_join(guild: discord.Guild):
     await ensure_rank_roles(guild)
     await ensure_staff_role(guild)
     await ensure_member_role(guild)
-    # Give Member role to all existing members in this guild
-    role = discord.utils.get(guild.roles, name=MEMBER_ROLE_NAME)
-    if role:
-        for member in guild.members:
-            if not member.bot and role not in member.roles:
-                try:
-                    await member.add_roles(role, reason="Bot joined: auto Member role")
-                    await asyncio.sleep(0.3)
-                except Exception:
-                    pass
-    print(f"[BOT] Joined new guild: {guild.name}, created rank, staff, and member roles")
+    await _setup_guild_channels(guild)
+    print(f"[BOT] Joined new guild: {guild.name} — roles and channels set up")
 
 @bot.event
 async def on_invite_create(invite: discord.Invite):
@@ -1806,13 +1880,13 @@ async def on_member_join(member: discord.Member):
     except Exception as e:
         print(f"[INVITE] Error tracking invite: {e}")
 
-    # ── Auto-assign Member role on join ──
-    member_role = await ensure_member_role(guild)
-    if member_role and member_role not in member.roles:
+    # ── Auto-assign Unverified role on join (Member is manually granted later) ──
+    unverified_role = await ensure_unverified_role(guild)
+    if unverified_role and unverified_role not in member.roles:
         try:
-            await member.add_roles(member_role, reason="Auto-assigned Member role on join")
+            await member.add_roles(unverified_role, reason="Auto-assigned Unverified role on join")
         except Exception as e:
-            print(f"[INVITE] Could not assign Member role to {member}: {e}")
+            print(f"[INVITE] Could not assign Unverified role to {member}: {e}")
 
     # ── Store inviter — reward fires in on_member_update when Member role is confirmed ──
     # Supports external verification bots that grant Member role after a separate verify step.
@@ -2042,7 +2116,7 @@ def admin_only():
             authed = await is_admin_user(interaction.user)
         if not authed:
             await interaction.response.send_message(
-                "❌ You need the **Operations Manager** role.", ephemeral=True)
+                "❌ You need the **Admin** role.", ephemeral=True)
             return False
         return True
     return app_commands.check(predicate)
@@ -2128,10 +2202,12 @@ async def cmd_link(interaction: discord.Interaction, username: str):
     embed = discord.Embed(
         title=None,
         description=(
-            f"## 🔗  ROBLOX LINKED\n"
-            f"**{roblox_name}** (ID: `{roblox_id}`) is now connected to your Sabpot profile.\n\n"
-            f"> Your Roblox avatar will appear on `/balance`, `/stats`, and all game embeds.\n"
-            f"> You can now use all Sabpot commands!"
+            f"## 🔗  LINKED\n"
+            f"**{roblox_name}** is now connected to your account.\n"
+            f"`ID: {roblox_id}`\n\n"
+            f"─────────────────────────────\n"
+            f"Your Roblox avatar will appear on all game embeds.\n"
+            f"You can now use all Rbxflip commands! ✦"
         ),
         color=C_GOLD
     )
@@ -2171,14 +2247,12 @@ async def cmd_balance(interaction: discord.Interaction):
     embed = discord.Embed(
         color=C_GOLD,
         description=(
-            f"## 💎  {interaction.user.display_name}'s Balance\n"
-            f"💰 **Balance:** {format_amount(balance)} 💎\n"
-            f"🎲 **Wagered:** {format_amount(wagered)} 💎\n"
-            f"📈 **Profit:** {profit_str} 💎\n"
+            f"## 💎  {interaction.user.display_name}'s Wallet\n"
+            f"💰 **Gems** — {format_amount(balance)}\n"
+            f"🎲 **Wagered** — {format_amount(wagered)}\n"
+            f"📈 **Profit** — {profit_str}\n"
             f"\n"
-            f"Use /deposit to obtain balance\n"
-            f"Use /stock to view items available for withdraw\n"
-            f"5M ≈ 40M–50M/s"
+            f"Use `/deposit` to top up  ·  `/stock` to withdraw"
         )
     )
     embed.set_thumbnail(url=await get_avatar(interaction.user))
@@ -2205,17 +2279,9 @@ async def cmd_rank(interaction: discord.Interaction):
     wagered = row["wagered"]
     emoji, name, low, high, color = get_rank(wagered)
 
-    # Check if member has a dynamic role (Exclusive/Diamond Whale)
-    member = interaction.guild.get_member(interaction.user.id) if interaction.guild else None
-    has_diamond   = member and any(r.name == DIAMOND_ROLE   for r in member.roles)
-    has_exclusive = member and any(r.name == EXCLUSIVE_ROLE for r in member.roles)
-
-    if has_diamond:
-        display_emoji, display_name, display_color = "💎", "Diamond Whale", C_VIP
-    elif has_exclusive:
-        display_emoji, display_name, display_color = "👑", "Exclusive", C_VIP
-    else:
-        display_emoji, display_name, display_color = emoji, name, color
+    # /rank always shows wager-based rank only.
+    # Champion and Diamond Whale are leaderboard roles visible in /leaderboard only.
+    display_emoji, display_name, display_color = emoji, name, color
 
     is_max     = (high == math.inf)
     next_label = "MAX RANK" if is_max else format_amount(high)
@@ -2226,17 +2292,47 @@ async def cmd_rank(interaction: discord.Interaction):
     embed = discord.Embed(
         color=display_color,
         description=(
-            f"## {display_emoji}  {display_name}\n"
+            f"## {display_emoji}  {display_name.upper()}\n"
             f"{interaction.user.mention}\n"
-            f"```\n"
-            f"  wagered    {format_amount(wagered):>15}\n"
-            f"  next rank  {next_label:>15}\n"
-            f"  progress   {pct:>14.0f}%\n"
-            f"```"
-            f"`{bar_str}`"
+            f"─────────────────────────────\n"
+            f"**Wagered** `{format_amount(wagered)}`\n"
+            f"**Next Rank** `{next_label}`{need_str}\n"
+            f"`{bar_str}` {pct:.0f}%"
         )
     )
     embed.set_thumbnail(url=await get_avatar(interaction.user))
+    _brand_embed(embed)
+    await interaction.response.send_message(embed=embed)
+
+@bot.tree.command(name="ranks", description="View all ranks and their wager requirements.")
+async def cmd_ranks(interaction: discord.Interaction):
+    """Show all wager-based ranks and the two leaderboard-only roles."""
+    lines = []
+    for low, high, emoji, name, color in RANK_DATA:
+        req = format_amount(low) if low > 0 else "Starting rank"
+        if high >= 10**17:
+            next_txt = ""
+        else:
+            next_txt = f" → {format_amount(high)}"
+        lines.append(f"{emoji} **{name}** — `{req}`{next_txt}")
+
+    lb_lines = [
+        f"👑 **Champion** — 🏅 **#1** on the wagered leaderboard",
+        f"💎 **Diamond Whale** — 🥈🥉 **#2 & #3** on the wagered leaderboard",
+    ]
+
+    embed = discord.Embed(
+        color=C_GOLD,
+        title="✦  Sabpot — All Ranks",
+        description=(
+            "**Wager Ranks** — earned by wagering gems\n"
+            "─────────────────────────────\n"
+            + "\n".join(lines)
+            + "\n\n**Leaderboard Roles** — assigned hourly, not shown in /rank\n"
+            "─────────────────────────────\n"
+            + "\n".join(lb_lines)
+        )
+    )
     _brand_embed(embed)
     await interaction.response.send_message(embed=embed)
 
@@ -2267,19 +2363,21 @@ async def cmd_leaderboard(interaction: discord.Interaction, sort: str = "wagered
 
     def _lb_embed(lb_rows, lb_sort):
         MEDAL = {0: "🥇", 1: "🥈", 2: "🥉"}
+        LB_BADGE = {0: "👑 Champion", 1: "💎 Diamond Whale", 2: "💎 Diamond Whale"}
         lines = []
         for i, r in enumerate(lb_rows):
             rank_e, _, _, _, _ = get_rank(r["wagered"])
-            val  = format_amount(r[lb_sort])
-            medal = MEDAL.get(i, f"#{i+1}")
-            lines.append(f"{medal} {rank_e} <@{r['user_id']}> • {val}")
-        lbl = "Balance" if lb_sort == "balance" else "Total Wager"
+            val   = format_amount(r[lb_sort])
+            medal = MEDAL.get(i, f"`#{i+1}`")
+            badge = f"  `{LB_BADGE[i]}`" if i in LB_BADGE else ""
+            lines.append(f"{medal}  {rank_e} <@{r['user_id']}> — **{val}**{badge}")
+        lbl = "Gems" if lb_sort == "balance" else "Wagered"
         e   = discord.Embed(
             color=C_GOLD,
-            title=f"🎰  Leaderboard — {lbl}",
+            title=f"✦  Sabpot — Top {lbl}",
             description="\n".join(lines)
         )
-        e.set_footer(text=f"SABFlippy  •  Use /rank to check your stats  |  Today at {datetime.now(timezone.utc).strftime('%H:%M')}")
+        e.set_footer(text=f"/rank for your stats  ·  /ranks for all ranks  ·  {datetime.now(timezone.utc).strftime('%H:%M')} UTC")
         _brand_embed(e)
         return e
 
@@ -2371,12 +2469,12 @@ async def cmd_daily(interaction: discord.Interaction):
     embed = discord.Embed(
         color=C_WIN,
         description=(
-            f"## 🎁  Daily Reward\n"
-            f"{interaction.user.mention}  ·  {emoji} {rank_name}\n"
-            f"```diff\n"
-            f"+ {format_amount(reward):>28}\n"
-            f"  balance  {format_amount(new_bal):>21}\n"
-            f"```"
+            f"## 🎁  DAILY BONUS\n"
+            f"{interaction.user.mention}  ·  {emoji} **{rank_name}**\n"
+            f"╔══════════════════════╗\n"
+            f"║  + {format_amount(reward):>19}  ║\n"
+            f"║  bal  {format_amount(new_bal):>16}  ║\n"
+            f"╚══════════════════════╝"
         )
     )
     embed.set_thumbnail(url=await get_avatar(interaction.user))
@@ -2441,35 +2539,22 @@ async def cmd_tip(interaction: discord.Interaction, user: discord.Member, amount
     embed = discord.Embed(
         color=C_WIN,
         description=(
-            f"## 💸  Transfer\n"
-            f"```\n"
-            f"  from   {interaction.user.display_name[:18]:>22}\n"
-            f"  to     {user.display_name[:18]:>22}\n"
-            f"  ───────────────────────────────\n"
-            f"  amount {format_amount(amt):>22}\n"
-            f"```"
+            f"## 💸  Tip Sent\n"
+            f"**{interaction.user.display_name}** → **{user.display_name}**\n"
+            f"Amount: **{format_amount(amt)} 💎**"
         )
     )
-    embed.add_field(name="Your balance",  value=f"`{format_amount(sender_bal)} 💎`", inline=True)
-    embed.add_field(name="Their balance", value=f"`{format_amount(recv_bal)} 💎`",   inline=True)
+    embed.add_field(name="Your Balance",  value=f"**{format_amount(sender_bal)}** 💎", inline=True)
+    embed.add_field(name="Their Balance", value=f"**{format_amount(recv_bal)}** 💎",   inline=True)
     _brand_embed(embed)
     await interaction.response.send_message(embed=embed)
 
-    # Tip log — matches SABFlippy screenshot style
-    log_e = discord.Embed(
-        color=0xF59E0B,
-        description=(
-            f"## 💸  Tip Transaction\n"
-            f"👤 **From:** {interaction.user.mention} {interaction.user.id}\n"
-            f"👤 **To:** {user.mention} {user.id}\n"
-            f"💰 **Amount:** {format_amount(amt)}\n\n"
-            f"**📊 New Balances**\n"
-            f"{interaction.user.mention}: {format_amount(sender_bal)}\n"
-            f"{user.mention}: {format_amount(recv_bal)}\n\n"
-            f"**🎯 Wager Requirement Added**\n"
-            f"{user.mention} must wager: {format_amount(amt)}"
-        )
-    )
+    log_e = discord.Embed(color=0xF59E0B, title="💸  Tip")
+    log_e.add_field(name="From",    value=f"{interaction.user.mention}\n`{interaction.user.id}`", inline=True)
+    log_e.add_field(name="To",      value=f"{user.mention}\n`{user.id}`",                        inline=True)
+    log_e.add_field(name="Amount",  value=f"**{format_amount(amt)} 💎**",                        inline=False)
+    log_e.add_field(name="Balances after", value=f"{interaction.user.mention} → **{format_amount(sender_bal)}**\n{user.mention} → **{format_amount(recv_bal)}**", inline=False)
+    log_e.add_field(name="Wager req", value=f"{user.mention} must wager **{format_amount(amt)}** before withdrawing", inline=False)
     log_e.set_footer(text=now_ts())
     await send_tip_log(log_e)
 
@@ -2502,17 +2587,13 @@ async def cmd_stats(interaction: discord.Interaction, user: Optional[discord.Mem
         embed = discord.Embed(
             color=color,
             description=(
-                f"## {emoji}  {target.display_name}\n"
-                f"`{rank_name}`\n"
-                f"```\n"
-                f"  balance    {format_amount(row['balance']):>15}\n"
-                f"  wagered    {format_amount(row['wagered']):>15}\n"
-                f"  net p&l    {net_str:>15}\n"
-                f"  record     {row['wins']}W  {row['losses']}L  ({win_rate:.1f}%)\n"
-                f"  best run   {row['max_streak']:>15}\n"
-                f"  tips out   {format_amount(row['tips_sent']):>15}\n"
-                f"  tips in    {format_amount(row['tips_recv']):>15}\n"
-                f"```"
+                f"## {emoji}  {target.display_name.upper()}\n"
+                f"{rank_name}\n"
+                f"─────────────────────────────\n"
+                f"**Gems** `{format_amount(row['balance'])}`  ·  **Wagered** `{format_amount(row['wagered'])}`\n"
+                f"**P&L** `{net_str}`  ·  **Record** `{row['wins']}W {row['losses']}L ({win_rate:.1f}%)`\n"
+                f"**Best Streak** `{row['max_streak']}`\n"
+                f"**Tips Out** `{format_amount(row['tips_sent'])}`  ·  **Tips In** `{format_amount(row['tips_recv'])}`"
             )
         )
         embed.set_thumbnail(url=await get_avatar(target))
@@ -2559,7 +2640,7 @@ async def cmd_history(interaction: discord.Interaction):
         sign  = "+" if r["amount"] >= 0 else ""
         ts    = r["ts"][:16]
         lines.append(f"{icon} `{ts}`  **{sign}{format_amount(r['amount'])}**  _{r['action']}_")
-    embed = discord.Embed(title="Transaction History", description="\n".join(lines), color=C_GOLD)
+    embed = discord.Embed(title="📋  Recent Transactions", description="\n".join(lines), color=C_GOLD)
     _brand_embed(embed)
 
     await interaction.followup.send(embed=embed, ephemeral=True)
@@ -2680,14 +2761,16 @@ async def cmd_redeemcode(interaction: discord.Interaction, code: str):
         return
 
     embed = discord.Embed(
-        title=None,
-        description=f"You received **{format_amount(amt)} 💎**!",
-        color=C_WIN
+        color=C_WIN,
+        description=(
+            f"## 🎟️  CODE REDEEMED\n"
+            f"**`{code}`** — **{format_amount(amt)} 💎** added\n"
+            f"╔══════════════════════╗\n"
+            f"║  Gems  {format_amount(new_bal):>15}  ║\n"
+            f"╚══════════════════════╝\n"
+            f"Uses remaining: **{row['max_uses'] - new_uses}**"
+        )
     )
-    embed.add_field(name="Code",        value=f"`{code}`",             inline=True)
-    embed.add_field(name="Reward",      value=format_amount(amt),      inline=True)
-    embed.add_field(name="New Balance", value=format_amount(new_bal),  inline=True)
-    embed.add_field(name="Uses Left",   value=str(row["max_uses"] - new_uses), inline=True)
     _brand_embed(embed)
     await interaction.response.send_message(embed=embed)
 
@@ -2823,18 +2906,16 @@ async def cmd_createrain(interaction: discord.Interaction, amount: str, duration
     view      = RainView(interaction.user, amt, end_time, secs)
 
     embed = discord.Embed(
-        title=None,
-        description="## 🌧️  RAIN\n" + (
-            f"**{interaction.user.mention}** is raining **{format_amount(amt)} 💎**!\
-\
-"
-            "Click the button to join and get your share!\
-"
-            f"Rain ends in **{dur_label}**."
-        ),
-        color=C_BLUE
+        color=C_BLUE,
+        description=(
+            f"## 🌧️  GEM DROP\n"
+            f"**{interaction.user.mention}** is dropping **{format_amount(amt)} 💎**!\n"
+            f"─────────────────────────────\n"
+            f"Hit the button below to claim your share.\n"
+            f"Ends in **{dur_label}**."
+        )
     )
-    embed.set_footer(text=f"0 joined • {dur_label} remaining")
+    embed.set_footer(text=f"0 joined  ·  {dur_label} remaining")
     await interaction.response.send_message(embed=embed, view=view)
     msg       = await interaction.original_response()
     view._msg = msg
@@ -2950,7 +3031,7 @@ Each received **{format_amount(share)} 💎**!")
 
     asyncio.create_task(run_rain())
 
-@bot.tree.command(name="games", description="View casino game rules.")
+@bot.tree.command(name="games", description="Browse all games and their payouts.")
 async def cmd_games(interaction: discord.Interaction):
     _GAMES = {
         "classic": {
@@ -2980,7 +3061,7 @@ async def cmd_games(interaction: discord.Interaction):
             "fields": [
                 ("💣  Mines",        "5×5 grid. Reveal gems, dodge bombs. Cash out at any point. Up to **5,000×**."),
                 ("🏰  Towers",       "Climb **10** rows — 2 safe tiles, 1 bomb each row. Higher = bigger multiplier."),
-                ("⬆️  Upgrader",     "Set a target multiplier (min **1.2×**). Beat the odds to win big."),
+                ("⬆️  Upgrader",     "Set a target multiplier (1.2× minimum). Beat the odds and walk away bigger."),
                 ("🎈  Balloon",      "Each pump adds **+25%** but burst chance grows. Don't pop it!"),
                 ("🎰  Slots",        "Spin 3 reels — match symbols. Up to **50×** on triple 7s."),
                 ("🎲  Color Dice",   "Pick a color. Roll 6 dice. 2+ matches = refund  ·  1 match = **2×**  ·  0 = lose."),
@@ -3070,24 +3151,17 @@ def _giveaway_active_embed(prize: int, dur_label: str, end_str: str,
                             host_mention: str, count: int, remaining_secs: int) -> discord.Embed:
     remaining_str = format_duration(remaining_secs)
     e = discord.Embed(
-        title=None,
+        color=C_GOLD,
         description=(
-            f"**Prize:** {format_amount(prize)} 💎\
-"
-            f"**Duration:** {dur_label}\
-"
-            f"**Ends:** {end_str}\
-"
-            f"**Host:** {host_mention}\
-\
-"
-            "Click the button below to enter!\
-"
-            "Click again to leave."
-        ),
-        color=C_GOLD
+            f"## 🎉  GIVEAWAY\n"
+            f"╔══════════════════════╗\n"
+            f"║  Prize  {format_amount(prize):>14}  ║\n"
+            f"╚══════════════════════╝\n"
+            f"**Host:** {host_mention}  ·  **Ends:** {end_str}\n"
+            f"Press **Enter Giveaway** to join. Press again to leave."
+        )
     )
-    e.set_footer(text=f"{count} {'entry' if count == 1 else 'entries'} • Ends in {remaining_str}")
+    e.set_footer(text=f"{count} {'entry' if count == 1 else 'entries'}  ·  Ends in {remaining_str}")
     return e
 
 class GiveawayView(discord.ui.View):
@@ -3946,12 +4020,12 @@ class ProgressiveCoinflipView(BaseGameView):
                 pass
 
 
-@bot.tree.command(name="progressivecoinflip", description="Double your pot every round — cash out before you lose it all!")
+@bot.tree.command(name="progressivecoinflip", description="Double your pot each round — walk away before it's gone!")
 @app_commands.describe(bet="Bet amount e.g. 100k, 1M")
 async def cmd_progressivecoinflip(interaction: discord.Interaction, bet: str):
     wait = check_cooldown("progressivecoinflip", interaction.user.id)
     if wait > 0:
-        await interaction.response.send_message(f"⏳ Wait **{wait:.1f}s** before starting another game.", ephemeral=True)
+        await interaction.response.send_message(f"⏳ Wait **{wait:.1f}s** before playing again.", ephemeral=True)
         return
     if is_game_locked("progressivecoinflip", interaction.user):
         await interaction.response.send_message(
@@ -4229,12 +4303,12 @@ class ProgressiveDiceView(BaseGameView):
                 pass
 
 
-@bot.tree.command(name="progressivedice", description="Roll higher than the dealer — keep going or cash out!")
+@bot.tree.command(name="progressivedice", description="Beat the dealer each roll — chain wins or lock in your profit!")
 @app_commands.describe(bet="Bet amount e.g. 100k, 1M")
 async def cmd_progressivedice(interaction: discord.Interaction, bet: str):
     wait = check_cooldown("progressivedice", interaction.user.id)
     if wait > 0:
-        await interaction.response.send_message(f"⏳ Wait **{wait:.1f}s** before starting another game.", ephemeral=True)
+        await interaction.response.send_message(f"⏳ Wait **{wait:.1f}s** before playing again.", ephemeral=True)
         return
     if is_game_locked("progressivedice", interaction.user):
         await interaction.response.send_message(
@@ -4285,7 +4359,7 @@ async def cmd_progressivedice(interaction: discord.Interaction, bet: str):
 async def cmd_coinflip(interaction: discord.Interaction, bet: str, side: str):
     wait = check_cooldown("coinflip", interaction.user.id)
     if wait > 0:
-        await interaction.response.send_message(f"⏳ Cooldown — wait **{wait:.1f}s** before playing again.", ephemeral=True)
+        await interaction.response.send_message(f"⏳ Wait **{wait:.1f}s** before playing again.", ephemeral=True)
         return
     if is_game_locked("coinflip", interaction.user):
         await interaction.response.send_message(
@@ -4326,12 +4400,14 @@ async def cmd_coinflip(interaction: discord.Interaction, bet: str, side: str):
     view.creator_paid = True  # already deducted upfront
     view._pf_game_id  = pf["game_id"]
     embed = discord.Embed(
-        title="🪙  Coinflip — Flipping...",
         color=C_GOLD,
         description=(
-            f"💰  Bet: **{format_amount(amt)}** 💎\n"
-            f"🎯  Side: **{side}**\n\n"
-            f"Waiting for opponent to join..."
+            f"## 🪙  COINFLIP\n"
+            f"╔═══════════════════════╗\n"
+            f"║  Wager  {format_amount(amt):>14}  ║\n"
+            f"║  Side   {side:>14}  ║\n"
+            f"╚═══════════════════════╝\n"
+            f"Waiting for an opponent..."
         )
     )
     _brand_embed(embed)
@@ -4581,7 +4657,7 @@ class DiceView(BaseGameView):
 async def cmd_dice(interaction: discord.Interaction, bet: str):
     wait = check_cooldown("dice", interaction.user.id)
     if wait > 0:
-        await interaction.response.send_message(f"⏳ Cooldown — wait **{wait:.1f}s** before playing again.", ephemeral=True)
+        await interaction.response.send_message(f"⏳ Wait **{wait:.1f}s** before playing again.", ephemeral=True)
         return
     if is_game_locked("dice", interaction.user):
         await interaction.response.send_message(
@@ -4618,12 +4694,17 @@ async def cmd_dice(interaction: discord.Interaction, bet: str):
         return
     view  = DiceView(interaction.user, amt)
     embed = discord.Embed(
-        title="🎲  DICE ROLL",
-        description=f"{interaction.user.mention} bets **{format_amount(amt)}**!\
-Waiting for opponent...",
-        color=C_GOLD
+        color=C_GOLD,
+        description=(
+            f"## 🎲  DICE ROLL\n"
+            f"╔══════════════════════╗\n"
+            f"║  Wager  {format_amount(amt):>14}  ║\n"
+            f"╚══════════════════════╝\n"
+            f"Roll higher than your opponent to win **2×**.\n"
+            f"Tie = full refund."
+        )
     )
-    embed.set_footer(text=f"Wager: {format_amount(amt)}  ╱  Higher roll wins")
+    embed.set_footer(text="Join  ·  vs Bot  ·  Start")
     await interaction.response.send_message(embed=embed, view=view)
     view._original_message = await interaction.original_response()
 
@@ -4817,7 +4898,7 @@ class RouletteView(BaseGameView):
 async def cmd_roulette(interaction: discord.Interaction, bet: str):
     wait = check_cooldown("roulette", interaction.user.id)
     if wait > 0:
-        await interaction.response.send_message(f"⏳ Cooldown — wait **{wait:.1f}s** before playing again.", ephemeral=True)
+        await interaction.response.send_message(f"⏳ Wait **{wait:.1f}s** before playing again.", ephemeral=True)
         return
     if is_game_locked("roulette", interaction.user):
         await interaction.response.send_message(
@@ -4856,13 +4937,13 @@ async def cmd_roulette(interaction: discord.Interaction, bet: str):
     view.used = False  # will be set True on spin
     embed = discord.Embed(
         color=C_GOLD,
-        title="◉  ROULETTE",
         description=(
-            f"**Bet:** {format_amount(amt)}\n\n"
-            "🔴 **Red** → 45% chance, **2x**\n"
-            "⚫ **Black** → 45% chance, **2x**\n"
-            "🟡 **Yellow** → 10% chance, **6x**\n\n"
-            "Choose your color!"
+            f"## ◉  ROULETTE\n"
+            f"╔══════════════════════╗\n"
+            f"║  Wager  {format_amount(amt):>14}  ║\n"
+            f"╚══════════════════════╝\n"
+            f"🔴 **Red** — 2×  ·  ⚫ **Black** — 2×  ·  🟡 **Yellow** — 6×\n"
+            f"Pick your colour:"
         )
     )
     await interaction.response.send_message(embed=embed, view=view)
@@ -5182,7 +5263,7 @@ class BaccaratView(BaseGameView):
 async def cmd_baccarat(interaction: discord.Interaction, bet: str):
     wait = check_cooldown("baccarat", interaction.user.id)
     if wait > 0:
-        await interaction.response.send_message(f"⏳ Cooldown — wait **{wait:.1f}s** before playing again.", ephemeral=True)
+        await interaction.response.send_message(f"⏳ Wait **{wait:.1f}s** before playing again.", ephemeral=True)
         return
     if is_game_locked("baccarat", interaction.user):
         await interaction.response.send_message(
@@ -5220,12 +5301,15 @@ async def cmd_baccarat(interaction: discord.Interaction, bet: str):
     view  = BaccaratView(interaction.user, amt)
     embed = discord.Embed(
         color=C_GOLD,
-        description="## 🃏  BACCARAT\n> Pick your side — closest to **9** wins!"
+        description=(
+            f"## 🎴  BACCARAT\n"
+            f"╔══════════════════════╗\n"
+            f"║  Wager  {format_amount(amt):>14}  ║\n"
+            f"╚══════════════════════╝\n"
+            f"👤 **Player** 1:1  ·  🏦 **Banker** 1:1  ·  🤝 **Tie** 8:1\n"
+            f"Pick your side — closest to **9** wins:"
+        )
     )
-    embed.add_field(name="Wager",  value=f"`{format_amount(amt)} 💎`", inline=True)
-    embed.add_field(name="Player",  value="`1:1`",                       inline=True)
-    embed.add_field(name="Banker",  value="`1:1`",                       inline=True)
-    embed.add_field(name="Tie",     value="`8:1`",                       inline=True)
     _brand_embed(embed)
     await interaction.response.send_message(embed=embed, view=view)
     view._original_message = await interaction.original_response()
@@ -5285,9 +5369,11 @@ class BlackjackView(BaseGameView):
         embed = discord.Embed(
             color=C_GOLD,
             description=(
-                f"## 🃏  Blackjack\n"
-                f"**Bet:** {format_amount(total_bet)} 💎\n"
-                f"**Potential Winnings:** {format_amount(potential)} 💎"
+                f"## ♠️  BLACKJACK\n"
+                f"╔══════════════════════╗\n"
+                f"║  Wager  {format_amount(total_bet):>14}  ║\n"
+                f"║  Max    {format_amount(potential):>14}  ║\n"
+                f"╚══════════════════════╝"
             )
         )
         embed.add_field(
@@ -5542,7 +5628,7 @@ class BlackjackView(BaseGameView):
 async def cmd_blackjack(interaction: discord.Interaction, bet: str):
     wait = check_cooldown("blackjack", interaction.user.id)
     if wait > 0:
-        await interaction.response.send_message(f"⏳ Cooldown — wait **{wait:.1f}s** before playing again.", ephemeral=True)
+        await interaction.response.send_message(f"⏳ Wait **{wait:.1f}s** before playing again.", ephemeral=True)
         return
     if is_game_locked("blackjack", interaction.user):
         await interaction.response.send_message(
@@ -5652,7 +5738,7 @@ async def cmd_blackjack(interaction: discord.Interaction, bet: str):
             await release_conn(conn)
 
         try:
-            await self._original_message.edit(embed=bj_embed, view=None)
+            await msg.edit(embed=bj_embed, view=None)
         except Exception as e:
             print(f'[BJ INSTANT RESULT FAILED] {e}')
 
@@ -5808,7 +5894,7 @@ class BlackjackDiceView(BaseGameView):
             print(f"[BJDICE DB ERROR] {_db_err}")
 
         try:
-            await self._original_message.edit(embed=bj_embed, view=None)
+            await msg.edit(embed=bj_embed, view=None)
         except Exception as e:
             print(f'[BJ INSTANT RESULT FAILED] {e}')
 
@@ -6212,7 +6298,7 @@ class WarView(BaseGameView):
 "
         )
 
-        result_embed = discord.Embed(color=color, description=f"## ⚔️  WAR — {title}\n{result_desc(won, False, self.bet, payout)}")
+        result_embed = discord.Embed(color=color, description=f"## ⚔️  WAR — {title}\n{result_desc(creator_won if not is_tie else False, is_tie, self.bet, payout)}")
         result_embed.add_field(name="💰 Bet",    value=f"**{format_amount(self.bet)} 💎**",  inline=True)
         result_embed.add_field(name="🎁 Payout", value=f"**{format_amount(payout)} 💎**",   inline=True)
         result_embed.set_thumbnail(url=await get_avatar(self.creator))
@@ -6238,7 +6324,7 @@ async def cmd_war(interaction: discord.Interaction, bet: str):
     wait = check_cooldown("war", interaction.user.id)
     if wait > 0:
         await interaction.response.send_message(
-            f"⏳ Cooldown — wait **{wait:.1f}s** before playing again.", ephemeral=True)
+            f"⏳ Wait **{wait:.1f}s** before playing again.", ephemeral=True)
         return
     if is_game_locked("war", interaction.user):
         await interaction.response.send_message(
@@ -6299,8 +6385,18 @@ async def cmd_war(interaction: discord.Interaction, bet: str):
         f"Waiting for opponent...\
 "
     )
-    embed = discord.Embed(color=C_GOLD, description=f"## ⚔️  WAR\n{description}")
-    embed.set_footer(text="Join Game • Call Bot • Start")
+    embed = discord.Embed(
+        color=C_GOLD,
+        description=(
+            f"## ⚔️  WAR\n"
+            f"╔══════════════════════╗\n"
+            f"║  Wager  {format_amount(amt):>14}  ║\n"
+            f"╚══════════════════════╝\n"
+            f"Draw a card — highest card wins **2×**.\n"
+            f"Tie = both bets returned."
+        )
+    )
+    embed.set_footer(text="Join  ·  vs Bot  ·  Start")
     await interaction.response.send_message(embed=embed, view=view)
     view._original_message = await interaction.original_response()
 
@@ -6388,7 +6484,7 @@ class HiloView(BaseGameView):
     def next_winnings(self) -> int:
         return int(self.bet * self.next_mult)
 
-    # ── Embed builder (matches SABFlippy style exactly) ──────
+    # ── Embed builder (matches Rbxflip embed style) ──────
     def game_embed(self) -> discord.Embed:
         at_cap   = self.current_mult >= HILO_MAX_MULT
         card_str = hilo_card_str(self.current_card)
@@ -6423,34 +6519,20 @@ class HiloView(BaseGameView):
             f"💵 **Next Guess** • {next_str}\
 "
         )
-        embed = discord.Embed(color=C_GOLD, description=f"## 🎴  HI-LO\n{description}")
+        embed = discord.Embed(color=C_GOLD, description=f"## 🃏  HI-LO\n{description}")
         embed.set_footer(text=f"🎯 {guess_word} • Will the next card be higher or lower?")
         return embed
 
     # ── Bet deduction ─────────────────────────────────────────
 
 # ═══════════════════════════════════════════════════════════
-# END OF PART 1 — paste Part 2 directly below this line
-# ═══════════════════════════════════════════════════════════
-
-# ═══════════════════════════════════════════════════════════
-# END OF PART 1 — paste Part 2 directly below this line
-# ═══════════════════════════════════════════════════════════
-
-# ═══════════════════════════════════════════════════════════
-# SABPOT BOT — PART 2 OF 2
-# Paste this DIRECTLY below Part 1 in the same file (main.py)
+# RBXFLIP — PART 2 CONTINUES
 # ═══════════════════════════════════════════════════════════
 
 
 # ═══════════════════════════════════════════════════════════
 # END OF PART 1 — paste Part 2 directly below this line
 # ═══════════════════════════════════════════════════════════
-# ═══════════════════════════════════════════════════════════
-# SABPOT BOT — PART 2 OF 2
-# Paste this DIRECTLY below Part 1 in the same file (main.py)
-# ═══════════════════════════════════════════════════════════
-
     async def _deduct_bet(self) -> bool:
         if self.bet_deducted:
             return True
@@ -6535,27 +6617,16 @@ class HiloView(BaseGameView):
                 guesses    = self.rounds_won
                 guess_word = f"{guesses} Correct Guess{'es' if guesses != 1 else ''}"
                 lose_desc  = (
-                    f"┌─────────────────────────┐\
-"
-                    f"│ 💰 **Bet** • {format_amount(self.bet)} 💎\
-"
-                    f"│ 📊 **Multiplier** • {self.current_mult:.2f}x\
-"
-                    f"│ 💔 **Loss** • {format_amount(self.bet)} 💎\
-"
-                    f"│ 🎯 **Correct Guesses** • {guesses}\
-"
-                    f"└─────────────────────────┘\
-"
-                    f"\
-"
-                    f"**Your Card:** {hilo_card_str(prev_card)}\
-"
-                    f"**Next Card:** {hilo_card_str(new_card)}"
+                    f"💰 **Bet** — {format_amount(self.bet)} 💎\n"
+                    f"📊 **Multiplier** — {self.current_mult:.2f}x\n"
+                    f"💔 **Loss** — {format_amount(self.bet)} 💎\n"
+                    f"🎯 **Correct Guesses** — {guesses}\n"
+                    f"\n"
+                    f"Your Card: {hilo_card_str(prev_card)}  →  Next: {hilo_card_str(new_card)}"
                 )
                 lose_embed = discord.Embed(
                     color=C_LOSS,
-                    description=f"## 🎴  HI-LO — WRONG\n{lose_desc}\n{result_desc(False, False, self.bet, 0)}"
+                    description=f"## ✗  WRONG GUESS!\n{lose_desc}"
                 )
                 _brand_embed(lose_embed)
 
@@ -6629,21 +6700,14 @@ class HiloView(BaseGameView):
             guesses    = self.rounds_won
             guess_word = f"{guesses} Correct Guess{'es' if guesses != 1 else ''}"
             win_desc   = (
-                f"┌─────────────────────────┐\
-"
-                f"│ 💰 **Bet** • {format_amount(self.bet)} 💎\
-"
-                f"│ 📊 **Multiplier** • {self.current_mult:.2f}x\
-"
-                f"│ 🏆 **Payout** • {format_amount(payout)} 💎\
-"
-                f"│ 🎯 **Correct Guesses** • {guesses}\
-"
-                f"└─────────────────────────┘"
+                f"💰 **Bet** — {format_amount(self.bet)} 💎\n"
+                f"📊 **Multiplier** — {self.current_mult:.2f}x\n"
+                f"🏆 **Payout** — {format_amount(payout)} 💎\n"
+                f"🎯 **Correct Guesses** — {guesses}"
             )
             win_embed = discord.Embed(
                 color=C_WIN,
-                description=f"## 🎴  HI-LO — CASHOUT\n{win_desc}"
+                description=f"## 🎴  HI-LO — CASHED OUT\n{win_desc}"
             )
             _brand_embed(win_embed)
 
@@ -6724,7 +6788,7 @@ async def cmd_hilo(interaction: discord.Interaction, bet: str):
     wait = check_cooldown("hilo", interaction.user.id)
     if wait > 0:
         await interaction.response.send_message(
-            f"⏳ Cooldown — wait **{wait:.1f}s** before playing again.", ephemeral=True)
+            f"⏳ Wait **{wait:.1f}s** before playing again.", ephemeral=True)
         return
     if is_game_locked("hilo", interaction.user):
         await interaction.response.send_message(
@@ -6806,7 +6870,7 @@ def generate_tower() -> list[list[str]]:
 
 def render_tower(tower: list, current_row: int, revealed: dict) -> str:
     """
-    Render tower from top to bottom matching SABFlippy style.
+    Render tower from top to bottom matching Rbxflip style.
     Revealed rows show picked tile (✅/❌) and hide others as ⬛.
     Current row shows ⬛ ⬛ ⬛ (pickable).
     Future rows show ⬛ ⬛ ⬛.
@@ -7126,7 +7190,7 @@ async def cmd_towers(interaction: discord.Interaction, bet: str):
     wait = check_cooldown("towers", interaction.user.id)
     if wait > 0:
         await interaction.response.send_message(
-            f"⏳ Cooldown — wait **{wait:.1f}s** before playing again.", ephemeral=True)
+            f"⏳ Wait **{wait:.1f}s** before playing again.", ephemeral=True)
         return
     if is_game_locked("towers", interaction.user):
         await interaction.response.send_message(
@@ -7165,7 +7229,9 @@ async def cmd_towers(interaction: discord.Interaction, bet: str):
         return
     view  = TowersView(interaction.user, amt, tower)
     view.bet_deducted = True
-    await interaction.response.send_message(embed=view.game_embed(), view=view)
+    lobby = view.game_embed()
+    lobby.description = f"## 🗼  TOWERS\nWager: **{format_amount(amt)} 💎**  ·  Climb 10 rows\n─────────────────────────────\n" + (lobby.description or "")
+    await interaction.response.send_message(embed=lobby, view=view)
     view._original_message = await interaction.original_response()
 
 
@@ -7200,7 +7266,7 @@ def rps_cumulative_mult(wins: int) -> float:
 
 def rps_card_grid(history: list) -> str:
     """
-    Render card-style grid matching SABFlippy UI.
+    Render card-style grid matching Rbxflip UI.
     Top row = player moves, bottom row = bot moves.
     Each cell is a framed card with move label and multiplier badge below.
     """
@@ -7296,41 +7362,18 @@ class RPSView(BaseGameView):
 
         if outcome in ("win", "loss"):
             stats = (
-                f"```\
-"
-                f"🏁 Game Results\
-"
-                f"━━━━━━━━━━━━━━━━━━━━━━━\
-"
-                f"Consecutive Wins: {self.wins}\
-"
-                f"Total Rounds:     {self.total_rounds}\
-"
-                f"Bet Amount:       {format_amount(self.bet)}\
-"
-                f"Multiplier:       {self.current_mult:.2f}x\
-"
-                f"Payout:           {format_amount(payout)}\
-"
-                f"Profit:           {profit_str}\
-"
-                f"```"
+                f"💰 **Bet** — {format_amount(self.bet)} 💎\n"
+                f"📊 **Multiplier** — {self.current_mult:.2f}x\n"
+                f"🏆 **Payout** — {format_amount(payout)} 💎\n"
+                f"✨ **Profit** — {profit_str} 💎\n"
+                f"🎯 **Streak** — {self.wins}W  ·  {self.total_rounds} rounds"
             )
         else:
             stats = (
-                f"```\
-"
-                f"Wins:       {self.wins}\
-"
-                f"Rounds:     {self.total_rounds}\
-"
-                f"Bet:        {format_amount(self.bet)}\
-"
-                f"Multi:      {self.current_mult:.2f}x\
-"
-                f"Payout:     {format_amount(payout)}\
-"
-                f"```"
+                f"💰 **Bet** — {format_amount(self.bet)} 💎\n"
+                f"📊 **Multiplier** — {self.current_mult:.2f}x\n"
+                f"💵 **Cashout** — {format_amount(payout)} 💎\n"
+                f"🎯 **Streak** — {self.wins}W  ·  {self.total_rounds} rounds"
             )
 
         grid = rps_card_grid(self.history)
@@ -7577,7 +7620,7 @@ class RPSView(BaseGameView):
         await self._cashout(interaction)
 
 # ╔══════════════════════════════════════════════════════════════╗
-# ║                    SABPOT  —  PART 2 OF 2                    ║
+# ║                    RBXFLIP  —  PART 2 OF 2                    ║
 # ║  Paste this DIRECTLY below Part 1 in the same file.          ║
 # ║  UI REVAMP + Message Rewards: 500 msgs = 25M gems 💎         ║
 # ║  Spam warning: once per 15 minutes (not every 2 minutes)     ║
@@ -7591,7 +7634,7 @@ async def cmd_rps(interaction: discord.Interaction, bet: str):
     wait = check_cooldown("rps", interaction.user.id)
     if wait > 0:
         await interaction.response.send_message(
-            f"⏳ Cooldown — wait **{wait:.1f}s** before playing again.", ephemeral=True)
+            f"⏳ Wait **{wait:.1f}s** before playing again.", ephemeral=True)
         return
     if is_game_locked("rps", interaction.user):
         await interaction.response.send_message(
@@ -7761,35 +7804,30 @@ class MinesView(BaseGameView):
             stats = (
                 f"## 💥  MINES — BOOM!\n"
                 f"┌─────────────────────────┐\n"
-                f"│ 💰 **Bet** • {format_amount(self.bet)} 💎\n"
-                f"│ 💣 **Mines** • {self.mines}\n"
-                f"│ 💎 **Gems Found** • {self.gems_found}/{gems_total}\n"
-                f"│ ❌ **Loss** • -{format_amount(self.bet)} 💎\n"
-                f"└─────────────────────────┘"
+                f"💰 **Bet** — {format_amount(self.bet)} 💎\n"
+                f"💣 **Mines** — {self.mines}\n"
+                f"💎 **Found** — {self.gems_found}/{gems_total}\n"
+                f"❌ **Lost** — {format_amount(self.bet)} 💎"
             )
         elif outcome in ("win", "cleared"):
-            title_line = "## 🎉  VICTORY!" if outcome == "win" else "## 🏆  BOARD CLEARED!"
+            title_line = "## 🎉  VICTORY!" if outcome == "win" else "## 🏆  ALL CLEAR!"
             stats = (
                 f"{title_line}\n"
-                f"┌─────────────────────────────┐\n"
-                f"│ 💰 **Bet** • {format_amount(self.bet)} 💎\n"
-                f"│ 📊 **Multiplier** • {self.current_mult:.2f}x\n"
-                f"│ ✨ **Profit** • {profit_str} 💎\n"
-                f"│ 💎 **Gems Found** • {self.gems_found}/{gems_total}\n"
-                f"└─────────────────────────────┘"
+                f"💰 **Bet** — {format_amount(self.bet)} 💎\n"
+                f"📊 **Multiplier** — {self.current_mult:.2f}x\n"
+                f"✨ **Profit** — {profit_str} 💎\n"
+                f"💎 **Gems Found** — {self.gems_found}/{gems_total}"
             )
         else:
             next_mult   = mines_calc_mult(self.mines, self.gems_found + 1)
             cashout_tip = "\n💡 *Tap any revealed 💎 to cash out*" if self.gems_found > 0 else ""
             stats = (
                 f"## 💣  MINES\n"
-                f"┌─────────────────────────┐\n"
-                f"│ 💰 **Bet** • {format_amount(self.bet)} 💎\n"
-                f"│ 📊 **Multiplier** • {self.current_mult:.2f}x\n"
-                f"│ 💵 **Cashout** • {format_amount(payout)} 💎\n"
-                f"│ ➡️ **Next Gem** • {next_mult:.2f}x\n"
-                f"│ 💎 **Found** • {self.gems_found}/{gems_total}\n"
-                f"└─────────────────────────┘{cashout_tip}"
+                f"💰 **Bet** — {format_amount(self.bet)} 💎\n"
+                f"📊 **Multiplier** — {self.current_mult:.2f}x\n"
+                f"💵 **Cashout now** — {format_amount(payout)} 💎\n"
+                f"➡️ **Next gem** — {next_mult:.2f}x\n"
+                f"💎 **Found** — {self.gems_found}/{gems_total}{cashout_tip}"
             )
 
         embed = discord.Embed(color=color, description=f"{stats}\n\n{grid_str}")
@@ -8011,6 +8049,16 @@ async def cmd_mines(interaction: discord.Interaction, bet: str, mines: int):
     await interaction.response.send_message(embed=view.game_embed(), view=view)
     view._original_message = await interaction.original_response()
 
+
+
+# ═════════════════════════════════════════════════════════
+# RBXFLIP — PART 1 OF 2
+# Paste Part 2 directly below this line in the same file
+# ═════════════════════════════════════════════════════════
+# ═════════════════════════════════════════════════════════
+# RBXFLIP — PART 2 OF 2
+# Paste directly below Part 1 — no imports needed
+# ═════════════════════════════════════════════════════════
 
 # ═══════════════════════════════════════════════════════════
 # GAME: SCRATCH CARD
@@ -8350,7 +8398,7 @@ class ScratchView(BaseGameView):
                 print(f"[ERROR] {type(e).__name__}: {e}")
                 pass
 
-@bot.tree.command(name="scratch", description="Buy a scratch card — match 3 symbols to win!")
+@bot.tree.command(name="scratch", description="Scratch and match 3 symbols to win big!")
 @app_commands.describe(bet="Bet amount e.g. 5k, 1M")
 async def cmd_scratch(interaction: discord.Interaction, bet: str):
     wait = check_cooldown("scratch", interaction.user.id)
@@ -8496,7 +8544,7 @@ def hr_race_embed(positions: list, bet: int, chosen: int,
     embed.set_footer(text=f"🏇 Horse Race • {'Race Over!' if done else 'Racing...'}")
     return embed
 
-@bot.tree.command(name="horserace", description="Bet on a horse race — pick your horse and win 3.8x!")
+@bot.tree.command(name="horserace", description="Back a horse — pick right and win 3.8×!")
 @app_commands.describe(
     bet="Bet amount e.g. 5k, 1M",
     horse="Horse number (1-4)"
@@ -9111,7 +9159,7 @@ class SlotsView(BaseGameView):
         e = discord.Embed(
             color=C_GOLD,
             description=(
-                f"## 🎰  SLOTS\n"
+                f"## 🎰  SLOT MACHINE\n"
                 f"```\n  wager   {format_amount(self.bet):>14}\n```\n"
                 f"{_slots_paytable_str()}\n"
             )
@@ -9267,7 +9315,7 @@ async def cmd_slots(interaction: discord.Interaction, amount: str):
     wait = check_cooldown("slots", interaction.user.id)
     if wait > 0:
         await interaction.response.send_message(
-            f"⏳ Cooldown — wait **{wait:.1f}s** before playing again.", ephemeral=True)
+            f"⏳ Wait **{wait:.1f}s** before playing again.", ephemeral=True)
         return
     if is_game_locked("slots", interaction.user):
         await interaction.response.send_message(
@@ -9302,7 +9350,7 @@ async def cmd_slots(interaction: discord.Interaction, amount: str):
     await interaction.response.send_message(embed=view._ready_embed(), view=view)
     view._original_message = await interaction.original_response()
 
-@bot.tree.command(name="pumpballoon", description="Pump the balloon — each pump adds 25% but risk increases!")
+@bot.tree.command(name="pumpballoon", description="Pump for +25% each round — don't let it pop!")
 @app_commands.describe(bet="Bet amount e.g. 5k, 1M")
 async def cmd_pumpballoon(interaction: discord.Interaction, bet: str):
     wait = check_cooldown("pumpballoon", interaction.user.id)
@@ -9616,7 +9664,7 @@ class ColorDiceView(BaseGameView):
                 pass
 
 
-@bot.tree.command(name="colordice", description="Pick a color — land once=2x, land twice+=tie refund, miss=lose!")
+@bot.tree.command(name="colordice", description="Pick a colour — match once for 2×, twice+ for refund, miss to lose!")
 @app_commands.describe(bet="Bet amount e.g. 5k, 1M")
 async def cmd_colordice(interaction: discord.Interaction, bet: str):
     wait = check_cooldown("colordice", interaction.user.id)
@@ -9759,7 +9807,7 @@ def upgrader_embed(bet: int, mult: float, outcome: str = "pending", arrow_pos: f
     return embed
 
 
-@bot.tree.command(name="upgrader", description="Set a multiplier and spin — higher = riskier!")
+@bot.tree.command(name="upgrader", description="Set a target multiplier and spin — higher targets = higher risk!")
 @app_commands.describe(
     bet="Bet amount e.g. 5k, 1M",
     multiplier="Target multiplier (min 1.2). e.g. 1.2, 2.5, 10"
@@ -9905,7 +9953,7 @@ async def cmd_upgrader(interaction: discord.Interaction, bet: str, multiplier: f
 # VERIFY SYSTEM
 # ═══════════════════════════════════════════════════════════
 
-VERIFIED_ROLE_NAME = "Verified"
+# VERIFIED_ROLE_NAME defined near top of file
 
 async def ensure_verified_role(guild: discord.Guild) -> discord.Role | None:
     """Ensure the Verified role exists, create it if not."""
@@ -10298,26 +10346,25 @@ async def _get_stock_item(conn, item_name: str):
         item_name
     )
 
-async def _stock_embed(rows) -> discord.Embed:
-    """Build the public /stock embed from rows."""
-    e = discord.Embed(color=C_GOLD, title="🏪  Stock Shop")
+async def _stock_embed(rows, page: int = 0, page_size: int = 10) -> discord.Embed:
+    """Build the public /stock embed — numbered list, paginated."""
+    e = discord.Embed(color=C_GOLD, title="📦  Withdrawal Shop")
     if not rows:
         e.description = "*No items currently in stock.*"
         _brand_embed(e)
         return e
-    lines = []
-    for r in rows:
-        qty  = r["quantity"]
+    total   = len(rows)
+    pages   = max(1, (total + page_size - 1) // page_size)
+    page    = max(0, min(page, pages - 1))
+    chunk   = rows[page * page_size:(page + 1) * page_size]
+    lines   = []
+    for idx, r in enumerate(chunk, start=page * page_size + 1):
         val  = r["unit_value"]
         name = r["item_name"]
-        usd  = val / COINS_PER_DOLLAR
-        lines.append(
-            f"**{name}**\n"
-            f"> Cost: `{format_amount(val)} coins`  ·  `${usd:.2f}`  ·  ✅ {qty} left"
-        )
-    e.description = "\n\n".join(lines)
+        lines.append(f"`{idx}.` **{name}** — **{format_amount(val)}** 💎")
+    e.description = "\n".join(lines)
+    e.set_footer(text=f"Page {page+1}/{pages}  ·  {total} items total  ·  /withdraw to redeem")
     _brand_embed(e)
-
     return e
 
 
@@ -10807,7 +10854,7 @@ async def cmd_withdraw(interaction: discord.Interaction):
 
 
 # ── /stock ─────────────────────────────────────────────────
-@bot.tree.command(name="stock", description="View all items available for withdrawal in the shop.")
+@bot.tree.command(name="stock", description="View all items in the shop available for withdrawal.")
 async def cmd_stock(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=False)
     conn = await get_conn()
@@ -11277,7 +11324,7 @@ Balance: **{format_amount(new_bal)}**",
 # ADMIN: ANNOUNCE
 # ═══════════════════════════════════════════════════════════
 
-@bot.tree.command(name="announce", description="[Admin] Send a casino announcement to a channel.")
+@bot.tree.command(name="announce", description="[Admin] Post an announcement to a channel.")
 @app_commands.describe(
     channel="Channel to send the announcement to",
     title="Title of the announcement",
@@ -11358,7 +11405,7 @@ async def cmd_dmannouncement(
     }
     embed_color = color_map.get(color.lower(), C_GOLD)
     embed = discord.Embed(title=f"📣 {title}", description=message, color=embed_color)
-    embed.set_footer(text=f"Sabpot Announcement • {now_ts()}")
+    embed.set_footer(text=f"Rbxflip  ·  {now_ts()}")
     if interaction.guild and interaction.guild.icon:
         embed.set_thumbnail(url=interaction.guild.icon.url)
 
@@ -11431,8 +11478,8 @@ async def cmd_dmannouncement(
     log_e.set_footer(text=now_ts())
     await send_finance_log(log_e)
 
-@bot.tree.command(name="assignstaff", description="[Admin] Give a user the Deposit Moderator role.")
-@app_commands.describe(user="User to promote to Deposit Moderator")
+@bot.tree.command(name="assignstaff", description="[Admin] Give a user the Moderator role.")
+@app_commands.describe(user="User to promote to Moderator")
 @admin_only()
 async def cmd_assignstaff(interaction: discord.Interaction, user: discord.Member):
     if not interaction.guild:
@@ -11442,7 +11489,7 @@ async def cmd_assignstaff(interaction: discord.Interaction, user: discord.Member
     staff_role = await ensure_staff_role(interaction.guild)
     if not staff_role:
         await interaction.response.send_message(
-            "❌ Could not find or create the Deposit Moderator role. Check bot permissions.", ephemeral=True)
+            "❌ Could not find or create the Moderator role. Check bot permissions.", ephemeral=True)
         return
 
     if staff_role in user.roles:
@@ -11454,7 +11501,7 @@ async def cmd_assignstaff(interaction: discord.Interaction, user: discord.Member
         await user.add_roles(staff_role, reason=f"Assigned by admin {interaction.user}")
     except discord.Forbidden:
         await interaction.response.send_message(
-            "❌ Bot lacks permission to assign roles. Make sure the bot's role is above Deposit Moderator.", ephemeral=True)
+            "❌ Bot lacks permission to assign roles. Make sure the bot's role is above Moderator.", ephemeral=True)
         return
 
     embed = discord.Embed(
@@ -11469,7 +11516,7 @@ async def cmd_assignstaff(interaction: discord.Interaction, user: discord.Member
 
     try:
         await user.send(embed=discord.Embed(
-            title="🎖️ You've been made Deposit Moderator!",
+            title="🎖️ You've been made Moderator!",
             description=f"You were assigned the **{STAFF_ROLE_NAME}** role in **{interaction.guild.name}** by {interaction.user.mention}.",
             color=C_BLUE
         ))
@@ -11483,8 +11530,8 @@ async def cmd_assignstaff(interaction: discord.Interaction, user: discord.Member
     await send_log(log_e)
 
 
-@bot.tree.command(name="removestaff", description="[Admin] Remove the Deposit Moderator role from a user.")
-@app_commands.describe(user="User to remove from Deposit Moderator")
+@bot.tree.command(name="removestaff", description="[Admin] Remove the Moderator role from a user.")
+@app_commands.describe(user="User to remove from Moderator")
 @admin_only()
 async def cmd_removestaff(interaction: discord.Interaction, user: discord.Member):
     if not interaction.guild:
@@ -11521,7 +11568,7 @@ async def cmd_removestaff(interaction: discord.Interaction, user: discord.Member
 
     try:
         await user.send(embed=discord.Embed(
-            title="🚫 Deposit Moderator Role Removed",
+            title="🚫 Moderator Role Removed",
             description=f"Your **{STAFF_ROLE_NAME}** role in **{interaction.guild.name}** was removed by {interaction.user.mention}.",
             color=C_LOSS
         ))
@@ -11535,7 +11582,7 @@ async def cmd_removestaff(interaction: discord.Interaction, user: discord.Member
     await send_log(log_e)
 
 
-@bot.tree.command(name="liststaff", description="[Admin] List all current Deposit Moderator members.")
+@bot.tree.command(name="liststaff", description="[Admin] List all current Moderator members.")
 @admin_only()
 async def cmd_liststaff(interaction: discord.Interaction):
     if not interaction.guild:
@@ -11556,7 +11603,7 @@ async def cmd_liststaff(interaction: discord.Interaction):
 
     lines = [f"`{i+1}.` {m.mention} — `{m.id}`" for i, m in enumerate(members)]
     embed = discord.Embed(
-        title=f"💰 Deposit Moderators ({len(members)})",
+        title=f"💰 Moderators ({len(members)})",
         description="\
 ".join(lines),
         color=C_BLUE
@@ -11753,7 +11800,7 @@ async def cmd_audit(interaction: discord.Interaction, admin: Optional[discord.Me
         await interaction.followup.send("⚠️  Something went wrong — try again.", ephemeral=True)
 
 
-@bot.tree.command(name="adminstats", description="[Admin] Sabpot performance dashboard — house profit, game breakdown, tax collected.")
+@bot.tree.command(name="adminstats", description="[Admin] Rbxflip performance dashboard — house profit, game breakdown, tax collected.")
 @admin_only()
 async def cmd_adminstats(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=True)
@@ -11778,10 +11825,6 @@ async def cmd_adminstats(interaction: discord.Interaction):
                WHERE action NOT LIKE '%_tax' AND action NOT IN ('addcoins','deposit_ticket','invite_reward','tip','rakeback','rain','wager_requirement_added','wager_requirement_cleared')
                GROUP BY action ORDER BY volume DESC LIMIT 10"""
         )
-        # Top 5 depositors
-        top5 = await conn.fetch(
-            "SELECT user_id, username, total_deposited FROM users ORDER BY total_deposited DESC LIMIT 5"
-        )
         # Current win tax rate
         tax_rate_row = await conn.fetchrow("SELECT value FROM bot_settings WHERE key='win_tax'")
     finally:
@@ -11799,7 +11842,7 @@ async def cmd_adminstats(interaction: discord.Interaction):
     tax_rate        = float(tax_rate_row["value"]) if tax_rate_row else 0.12
     house_profit    = total_deposited - in_circulation
 
-    embed = discord.Embed(title="Sabpot Dashboard", color=C_GOLD)
+    embed = discord.Embed(title="✦  Rbxflip — Dashboard", color=C_GOLD)
     embed.add_field(name="👥 Total Users",        value=f"{total_users:,}",                    inline=True)
     embed.add_field(name="💎 In Circulation",     value=format_amount(in_circulation),         inline=True)
     embed.add_field(name="📥 Total Deposited",    value=format_amount(total_deposited),        inline=True)
@@ -11819,14 +11862,6 @@ async def cmd_adminstats(interaction: discord.Interaction):
         )
         embed.add_field(name="🎮 Top Games by Volume", value=game_lines, inline=False)
 
-    # Top 5 depositors
-    if top5:
-        top5_lines = "\n".join(
-            f"`#{i+1}` {r['username']} — {format_amount(r['total_deposited'])}"
-            for i, r in enumerate(top5)
-        )
-        embed.add_field(name="👑 Top 5 Depositors", value=top5_lines, inline=False)
-
     try:
         embed.set_footer(text=f"Admin only • {now_ts()}")
         await interaction.followup.send(embed=embed, ephemeral=True)
@@ -11843,12 +11878,6 @@ async def cmd_bankroll(interaction: discord.Interaction):
     try:
         totals = await conn.fetchrow(
             "SELECT SUM(balance) as circulation, SUM(total_deposited) as deposited, COUNT(*) as users FROM users"
-        )
-        top5_bal = await conn.fetch(
-            "SELECT user_id, username, balance FROM users ORDER BY balance DESC LIMIT 5"
-        )
-        top5_dep = await conn.fetch(
-            "SELECT user_id, username, total_deposited FROM users ORDER BY total_deposited DESC LIMIT 5"
         )
         tax_row = await conn.fetchrow(
             "SELECT COALESCE(SUM(ABS(amount)), 0) as total FROM transactions WHERE action LIKE '%_tax'"
@@ -11868,20 +11897,6 @@ async def cmd_bankroll(interaction: discord.Interaction):
     embed.add_field(name="👥 Total Players",         value=f"{users:,}",              inline=True)
     embed.add_field(name="💸 Tax Collected",         value=format_amount(tax),         inline=True)
     embed.add_field(name="📈 House Profit Est.",     value=format_amount(max(0, profit_est)), inline=True)
-
-    if top5_bal:
-        bal_lines = "\n".join(
-            f"`#{i+1}` {r['username']} — {format_amount(r['balance'])}"
-            for i, r in enumerate(top5_bal)
-        )
-        embed.add_field(name="💰 Richest Players", value=bal_lines, inline=False)
-
-    if top5_dep:
-        dep_lines = "\n".join(
-            f"`#{i+1}` {r['username']} — {format_amount(r['total_deposited'])}"
-            for i, r in enumerate(top5_dep)
-        )
-        embed.add_field(name="📥 Top Depositors (VIP)", value=dep_lines, inline=False)
 
     embed.set_footer(text=f"Admin only • {now_ts()}")
     await interaction.followup.send(embed=embed, ephemeral=True)
@@ -12019,7 +12034,7 @@ async def cmd_provablyfair(interaction: discord.Interaction, game_id: str):
         return
 
     # Fully revealed — show everything
-    name = pf.get("game_name", "Sabpot Game")
+    name = pf.get("game_name", "Rbxflip Game")
     embed = pf_reveal_embed(pf, name)
     embed.description += (
         "\n\n**How to verify yourself:**\n"
@@ -12659,7 +12674,7 @@ async def global_link_check(interaction: discord.Interaction) -> bool:
     e = discord.Embed(
         title="🔗  Link Required",
         description=(
-            "You must link your **Roblox account** before using any Sabpot commands.\n\n"
+            "You must link your **Roblox account** before using any Rbxflip commands.\n\n"
             "> Use `/link <username>` to connect your Roblox account.\n"
             "> Your Roblox avatar will appear on all game embeds once linked!"
         ),
@@ -12715,7 +12730,7 @@ async def on_app_command_error(interaction: discord.Interaction, error: app_comm
 # VIP ROOM SYSTEM
 # ═══════════════════════════════════════════════════════════
 #
-# /createviproom — create a private VIP channel (requires 75M+ balance)
+# /createviproom — create a private VIP channel (requires 70M+ balance)
 # /deleteviproom — delete your VIP room
 # /addviproom @user — add someone to your VIP room
 # /removeviproom @user — remove someone from your VIP room
@@ -12723,7 +12738,7 @@ async def on_app_command_error(interaction: discord.Interaction, error: app_comm
 # Balance checked after every game via check_vip_balance()
 # Drop below 75M → warning in channel → 5 min to recover → auto delete
 
-VIP_MIN_BALANCE   = 7_500_000_000   # 75M gems display required to create/keep VIP room
+VIP_MIN_BALANCE   = 7_000_000_000   # 70M gems required to create/keep a VIP room
 VIP_WARN_MINUTES  = 5               # minutes before deletion after warning
 VIP_CATEGORY_NAME = "👑 VIP"        # Same category as the VIP lounge — rooms created here too
 
@@ -12837,7 +12852,7 @@ async def check_vip_balance(user_id: int, guild: discord.Guild | None):
             task.cancel()
 
 
-@bot.tree.command(name="createviproom", description="Create your own private VIP room (requires 75M+ balance).")
+@bot.tree.command(name="createviproom", description="Create your own private VIP room (requires 70M+ balance).")
 async def cmd_createviproom(interaction: discord.Interaction):
     if not interaction.guild:
         await interaction.response.send_message("❌ Server only.", ephemeral=True)
@@ -12952,8 +12967,8 @@ async def cmd_deleteviproom(interaction: discord.Interaction):
     user="User to give the role to (leave empty for yourself)"
 )
 @app_commands.choices(role=[
-    app_commands.Choice(name="Operations Manager", value="Operations Manager"),
-    app_commands.Choice(name="Deposit Moderator",  value="Deposit Moderator"),
+    app_commands.Choice(name="Admin", value="Admin"),
+    app_commands.Choice(name="Moderator",  value="Moderator"),
     app_commands.Choice(name="Member",           value="Member"),
     app_commands.Choice(name="💎 VIP",            value="💎 VIP"),
     app_commands.Choice(name="👑 Exclusive",      value="👑 Exclusive"),
@@ -12967,7 +12982,7 @@ async def cmd_addrole(interaction: discord.Interaction,
         return
 
     # Only admins/owner can give admin-tier roles; anyone can run to get Member
-    privileged_roles = {"Operations Manager", "Deposit Moderator", "💎 VIP", "👑 Exclusive", "💎 Diamond Whale"}
+    privileged_roles = {"Admin", "Moderator", "💎 VIP", "👑 Exclusive", "💎 Diamond Whale"}
     caller = interaction.user
     caller_is_admin = is_admin(caller) if isinstance(caller, discord.Member) else False
     caller_is_owner = (interaction.guild.owner_id == caller.id)
@@ -13034,8 +13049,8 @@ async def cmd_addrole(interaction: discord.Interaction,
     user="User to remove the role from (leave empty for yourself)"
 )
 @app_commands.choices(role=[
-    app_commands.Choice(name="Operations Manager", value="Operations Manager"),
-    app_commands.Choice(name="Deposit Moderator",  value="Deposit Moderator"),
+    app_commands.Choice(name="Admin", value="Admin"),
+    app_commands.Choice(name="Moderator",  value="Moderator"),
     app_commands.Choice(name="Member",           value="Member"),
     app_commands.Choice(name="💎 VIP",            value="💎 VIP"),
     app_commands.Choice(name="👑 Exclusive",      value="👑 Exclusive"),
@@ -13048,7 +13063,7 @@ async def cmd_removerole(interaction: discord.Interaction,
         await interaction.response.send_message("❌ Server only.", ephemeral=True)
         return
 
-    privileged_roles = {"Operations Manager", "Deposit Moderator", "💎 VIP", "👑 Exclusive", "💎 Diamond Whale"}
+    privileged_roles = {"Admin", "Moderator", "💎 VIP", "👑 Exclusive", "💎 Diamond Whale"}
     caller = interaction.user
     caller_is_admin = is_admin(caller) if isinstance(caller, discord.Member) else False
     caller_is_owner = (interaction.guild.owner_id == caller.id)
@@ -13190,7 +13205,7 @@ async def cmd_removeviproom(interaction: discord.Interaction, user: discord.Memb
 # ADMIN: UPDATE LOG
 # ═══════════════════════════════════════════════════════════
 
-class UpdateModal(discord.ui.Modal, title="🎰 Sabpot Update Log"):
+class UpdateModal(discord.ui.Modal, title="✦ Rbxflip — Update Log"):
     added = discord.ui.TextInput(
         label="🆕 New Features Added",
         placeholder="Added /colordice game\
@@ -13259,11 +13274,11 @@ Improved mines multipliers",
 ".join(sections)
 
         embed = discord.Embed(
-            title=f"🎰 Sabpot Update — {self.version}",
+            title=f"🎰 Rbxflip Update — {self.version}",
             description=description,
             color=C_WIN
         )
-        embed.set_author(name="Sabpot Update Log", icon_url=interaction.guild.icon.url if interaction.guild and interaction.guild.icon else None)
+        embed.set_author(name="Rbxflip Update Log", icon_url=interaction.guild.icon.url if interaction.guild and interaction.guild.icon else None)
         embed.set_footer(text=f"Posted by {interaction.user.display_name} • {now_ts()}")
 
         await self.channel.send(embed=embed)
@@ -13299,25 +13314,25 @@ async def cmd_update(
 
 # Rakeback % per rank name (all-time wagered rank)
 RAKEBACK_RATES = {
-    "Snail":        0.005,   # 0.5%
+    "Bronze":       0.005,   # 0.5%
     "Silver":       0.010,   # 1.0%
     "Gold":         0.015,   # 1.5%
     "Platinum":     0.020,   # 2.0%
-    "Emerald":      0.025,   # 2.5%
-    "Ruby":         0.030,   # 3.0%
+    "Ruby":         0.025,   # 2.5%
+    "Emerald":      0.030,   # 3.0%
     "High Roller":  0.035,   # 3.5%
-    "Legend":       0.045,   # 4.5%
-    "Whale":        0.055,   # 5.5%
-    "Exclusive":    0.060,   # 6.0%
-    "Diamond Whale":0.070,   # 7.0%
+    "Whale":        0.045,   # 4.5%
+    "Legend":       0.055,   # 5.5%
+    "Diamond Whale":0.065,   # 6.5%  (leaderboard top 2-3)
+    "Champion":     0.075,   # 7.5%  (leaderboard top 1)
 }
 
 def get_rakeback_rate(member: discord.Member) -> tuple[str, float]:
     """Return (rank_name, rate) based on member's current roles."""
-    if any(r.name == "💎 Diamond Whale" for r in member.roles):
+    if any(r.name == CHAMPION_ROLE for r in member.roles):
+        return "Champion", RAKEBACK_RATES["Champion"]
+    if any(r.name == DIAMOND_WHALE_ROLE for r in member.roles):
         return "Diamond Whale", RAKEBACK_RATES["Diamond Whale"]
-    if any(r.name == "👑 Exclusive" for r in member.roles):
-        return "Exclusive", RAKEBACK_RATES["Exclusive"]
     # Fall back to wagered-based rank
     return None, None  # resolved after DB lookup
 
@@ -14249,7 +14264,7 @@ async def _ensure_member_snapshot_table(conn):
             send_hour   INT  DEFAULT 12,
             send_minute INT  DEFAULT 0,
             message     TEXT DEFAULT '',
-            title       TEXT DEFAULT 'Sabpot Update',
+            title       TEXT DEFAULT 'Rbxflip Update',
             color       TEXT DEFAULT 'gold',
             enabled     BOOL DEFAULT FALSE,
             last_sent   TEXT DEFAULT ''
@@ -14311,7 +14326,7 @@ async def _send_daily_dms(title: str, message: str, color_name: str):
                 description=f"{user.mention}\n\n{message}",
                 color=color
             )
-            embed.set_footer(text=f"Sabpot • {now_ts()}")
+            embed.set_footer(text=f"Rbxflip  ·  {now_ts()}")
             await user.send(embed=embed)
             sent += 1
         except discord.Forbidden:
@@ -15487,7 +15502,7 @@ ACHIEVEMENTS = [
     {"id":"played_25000",   "emoji":"💀", "name":"Needs Help",         "desc":"Play 25,000 games total",               "cat":"gambling", "check": lambda r,x: (r["wins"]+r["losses"]) >= 25000},
     {"id":"comeback",       "emoji":"🔄", "name":"Comeback Kid",       "desc":"Win after losing 5 in a row",           "cat":"gambling", "check": lambda r,x: x.get("had_comeback", False)},
     # ── LOSS-BASED / dark humor ─────────────────────────
-    {"id":"first_loss",     "emoji":"😬", "name":"Welcome to Bloxy",   "desc":"Lose your first game",                  "cat":"gambling", "check": lambda r,x: r["losses"] >= 1},
+    {"id":"first_loss",     "emoji":"😬", "name":"Welcome to Rbxflip",   "desc":"Lose your first game",                  "cat":"gambling", "check": lambda r,x: r["losses"] >= 1},
     {"id":"lose_50",        "emoji":"📉", "name":"Rough Patch",        "desc":"Lose 50 games total",                   "cat":"gambling", "check": lambda r,x: r["losses"] >= 50},
     {"id":"lose_500",       "emoji":"💸", "name":"Chronic Loser",      "desc":"Lose 500 games total",                  "cat":"gambling", "check": lambda r,x: r["losses"] >= 500},
     {"id":"lose_streak_5",  "emoji":"🥶", "name":"Ice Cold",           "desc":"Hit a 5-game loss streak",              "cat":"gambling", "check": lambda r,x: x.get("worst_streak",0) >= 5},
