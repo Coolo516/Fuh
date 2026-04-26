@@ -312,12 +312,12 @@ COINFLIP_SPINNING_GIF = os.getenv("COINFLIP_SPINNING_GIF", "")  # Optional spinn
 
 # Dice roll GIFs — one per face (1-6). Override via Railway env vars.
 DICE_GIF = [
-    os.getenv("DICE_GIF_1", "https://i.imgur.com/jFEUIt7.gif"),  # 1
-    os.getenv("DICE_GIF_2", "https://i.imgur.com/6uB4fO9.gif"),  # 2
-    os.getenv("DICE_GIF_3", "https://i.imgur.com/nKKWc84.gif"),  # 3
-    os.getenv("DICE_GIF_4", "https://i.imgur.com/fXAnN7Z.gif"),  # 4
-    os.getenv("DICE_GIF_5", "https://i.imgur.com/dRiVtmV.gif"),  # 5
-    os.getenv("DICE_GIF_6", "https://i.imgur.com/D9UC0hu.gif"),  # 6
+    os.getenv("DICE_GIF_1", "https://cdn.discordapp.com/attachments/1497626985315307621/1497964042218639380/1filedice1-ezgif.com-effects.gif?ex=69ef6f3a&is=69ee1dba&hm=04c274ca0f29a0e2734eb9e69594e5be6b0ee843402c6b63ec89cd1199b1fbd6&"),  # 1
+    os.getenv("DICE_GIF_2", "https://cdn.discordapp.com/attachments/1497626985315307621/1497963571307614218/2_dice_1.gif?ex=69ef6eca&is=69ee1d4a&hm=8d6eeb6bd4a9d7da7b523cc7d5964d9e6692f91a72d76176f5cbcea4dcb77acf&"),  # 2
+    os.getenv("DICE_GIF_3", "https://cdn.discordapp.com/attachments/1497626985315307621/1497964050859167925/3_dice_gif_gif.gif?ex=69ef6f3c&is=69ee1dbc&hm=8642b4f8e4ebab95c6779d743ee240e3c7565f98f567c7705998e1521fed5de0&"),  # 3
+    os.getenv("DICE_GIF_4", "https://cdn.discordapp.com/attachments/1497626985315307621/1497963860274184262/4_dicess.gif?ex=69ef6f0f&is=69ee1d8f&hm=5f0e3e3f064d081678226385518c11409cfda6a55d908ff800d0561b271af304&"),  # 4
+    os.getenv("DICE_GIF_5", "https://cdn.discordapp.com/attachments/1497626985315307621/1497963744154747061/5_dices_orig.gif?ex=69ef6ef3&is=69ee1d73&hm=e215812c82248af16df99ed4cdac5f4c0b5c374e8c79c5a5a46da4510af5314d&"),  # 5
+    os.getenv("DICE_GIF_6", "https://cdn.discordapp.com/attachments/1497626985315307621/1497963851713347746/6_dice_orig.gif?ex=69ef6f0d&is=69ee1d8d&hm=93e5015a861664e3339c4b3eb8184f1aaff2c37adfd84d9511e91f268da59a9e&"),  # 6
 ]
 
 def get_dice_gif(roll: int) -> str:
@@ -4249,19 +4249,21 @@ class DiceGameState:
         )
 
     def lobby_embed(self) -> discord.Embed:
-        mode_desc = "🔼 Highest roll wins" if self.mode == "normal" else "🔽 Lowest roll wins"
+        mode_desc = "🔼 Normal — highest roll wins" if self.mode == "normal" else "🔽 Crazy — lowest roll wins"
         e = discord.Embed(
             color=C_GOLD,
             description=(
-                f"## 🎲  DICE BATTLE\n"
-                f"┌─────────────────────────────┐\n"
-                f"│ 👤 **Creator** • {self.creator.mention}\n"
-                f"│ 💰 **Bet** • {format_amount(self.bet)} 💎\n"
-                f"│ 🏆 **Pot** • {format_amount(self.pot())} 💎\n"
-                f"│ 🎮 **Mode** • {mode_desc}\n"
-                f"│ 🎯 **First to** • **{self.target}** wins\n"
-                f"└─────────────────────────────┘\n"
-                f"Anyone can click **Join** to enter!"
+                f"```\n"
+                f"  🎲  DICE BATTLE — OPEN LOBBY\n"
+                f"```\n"
+                f"╔══════════════════════════════╗\n"
+                f"║  👤  Host    •  {self.creator.display_name:<15} ║\n"
+                f"║  💎  Bet     •  {format_amount(self.bet):<15} ║\n"
+                f"║  🏆  Pot     •  {format_amount(self.pot()):<15} ║\n"
+                f"║  🎮  Mode   •  {mode_desc:<15} ║\n"
+                f"║  🎯  First to  {self.target} round(s) to win    ║\n"
+                f"╚══════════════════════════════╝\n"
+                f"Click **Join** to enter the battle!"
             )
         )
         _brand_embed(e)
@@ -4281,14 +4283,20 @@ class DiceModeView(discord.ui.View):
             await interaction.response.send_message("❌ Not your game.", ephemeral=True)
             return
         view = DiceTargetView(self.creator, self.bet, mode)
-        mode_label = "🔼 Normal (highest wins)" if mode == "normal" else "🔽 Crazy (lowest wins)"
+        mode_label = "🔼 Normal — highest roll wins" if mode == "normal" else "🔽 Crazy — lowest roll wins"
         e = discord.Embed(
             color=C_GOLD,
             description=(
-                f"## 🎲  DICE — MODE SELECTED\n"
-                f"**{mode_label}**\n\n"
-                f"How many rounds does someone need to win?\n"
-                f"Pick **1**, **2**, or **3**."
+                f"```\n"
+                f"  🎲  DICE BATTLE\n"
+                f"```\n"
+                f"╔══════════════════════════════╗\n"
+                f"║  💎  Bet    •  {format_amount(self.bet):<15} ║\n"
+                f"║  🎮  Mode  •  {mode_label:<16} ║\n"
+                f"╠══════════════════════════════╣\n"
+                f"║  How many rounds to win?        ║\n"
+                f"║  Pick  **1**,  **2**,  or  **3**             ║\n"
+                f"╚══════════════════════════════╝"
             )
         )
         _brand_embed(e)
@@ -4315,9 +4323,18 @@ class DiceModeView(discord.ui.View):
             finally:
                 await release_conn(conn)
         _end_game_session(self.creator.id)
-        await interaction.response.edit_message(
-            embed=discord.Embed(color=C_DARK, description="## 🎲  DICE — CANCELLED\n> Bet refunded."),
-            view=None)
+        e = discord.Embed(color=C_DARK)
+        e.description = (
+            "```\n"
+            "  🎲  DICE — CANCELLED\n"
+            "```\n"
+            "╔══════════════════════════╗\n"
+            "║  ✖  Game cancelled          ║\n"
+            "║  💎 Bet returned to balance  ║\n"
+            "╚══════════════════════════╝"
+        )
+        _brand_embed(e)
+        await interaction.response.edit_message(embed=e, view=None)
 
 
 class DiceTargetView(discord.ui.View):
@@ -4364,9 +4381,18 @@ class DiceTargetView(discord.ui.View):
             finally:
                 await release_conn(conn)
         _end_game_session(self.creator.id)
-        await interaction.response.edit_message(
-            embed=discord.Embed(color=C_DARK, description="## 🎲  DICE — CANCELLED\n> Bet refunded."),
-            view=None)
+        e = discord.Embed(color=C_DARK)
+        e.description = (
+            "```\n"
+            "  🎲  DICE — CANCELLED\n"
+            "```\n"
+            "╔══════════════════════════╗\n"
+            "║  ✖  Game cancelled          ║\n"
+            "║  💎 Bet returned to balance  ║\n"
+            "╚══════════════════════════╝"
+        )
+        _brand_embed(e)
+        await interaction.response.edit_message(embed=e, view=None)
 
 
 class DiceLobbyView(discord.ui.View):
@@ -4402,6 +4428,10 @@ class DiceLobbyView(discord.ui.View):
                         return
                 finally:
                     await release_conn(conn)
+            if not _start_game_session(interaction.user.id):
+                await interaction.response.send_message(
+                    "⏳ You already have an active game running! Finish it before joining.", ephemeral=True)
+                return
             state.opponent = interaction.user
             state.score[interaction.user.id] = 0
             state.waiting_roll = {state.creator.id, state.opponent.id}
@@ -4417,14 +4447,19 @@ class DiceLobbyView(discord.ui.View):
         e = discord.Embed(
             color=C_BLUE,
             description=(
-                f"## 🎲  DICE BATTLE — STARTED!\n"
-                f"┌─────────────────────────────┐\n"
-                f"│ 🔴 **{state.creator.display_name}** vs 🔵 **{state.opponent.display_name}**\n"
-                f"│ 💰 **Pot** • {format_amount(state.pot())} 💎\n"
-                f"│ 🎮 **Mode** • {mode_label}\n"
-                f"│ 🎯 **First to** • {state.target}\n"
-                f"└─────────────────────────────┘\n"
-                f"**Round 1** — both players do `/roll` to roll!"
+                f"```\n"
+                f"  🎲  DICE BATTLE — STARTING!\n"
+                f"```\n"
+                f"╔══════════════════════════════╗\n"
+                f"║  🔴  {state.creator.display_name:<25} ║\n"
+                f"║       ⚔️   vs                    ║\n"
+                f"║  🔵  {state.opponent.display_name:<25} ║\n"
+                f"╠══════════════════════════════╣\n"
+                f"║  🏆  Pot      •  {format_amount(state.pot()):<13} ║\n"
+                f"║  🎮  Mode    •  {mode_label:<14} ║\n"
+                f"║  🎯  First to  {state.target} round(s)          ║\n"
+                f"╚══════════════════════════════╝\n"
+                f"**Round 1** — both players use `/roll`!"
             )
         )
         _brand_embed(e)
@@ -4450,9 +4485,18 @@ class DiceLobbyView(discord.ui.View):
         _end_game_session(self.state.creator.id)
         for item in self.children:
             item.disabled = True
-        await interaction.response.edit_message(
-            embed=discord.Embed(color=C_DARK, description="## 🎲  DICE — CANCELLED\n> Bet refunded."),
-            view=self)
+        e = discord.Embed(color=C_DARK)
+        e.description = (
+            "```\n"
+            "  🎲  DICE — CANCELLED\n"
+            "```\n"
+            "╔══════════════════════════╗\n"
+            "║  ✖  Game cancelled          ║\n"
+            "║  💎 Bet returned to balance  ║\n"
+            "╚══════════════════════════╝"
+        )
+        _brand_embed(e)
+        await interaction.response.edit_message(embed=e, view=self)
 
     async def on_timeout(self):
         state = self.state
@@ -4467,16 +4511,26 @@ class DiceLobbyView(discord.ui.View):
             _end_game_session(state.creator.id)
             for item in self.children:
                 item.disabled = True
+            e = discord.Embed(color=C_DARK)
+            e.description = (
+                "```\n"
+                "  🎲  DICE — EXPIRED\n"
+                "```\n"
+                "╔══════════════════════════╗\n"
+                "║  ⏱  Lobby timed out         ║\n"
+                "║  💎 Bet returned to balance  ║\n"
+                "╚══════════════════════════╝"
+            )
+            _brand_embed(e)
             try:
-                await state.lobby_msg.edit(
-                    embed=discord.Embed(color=C_DARK, description="## 🎲  DICE — EXPIRED\n> Timed out — bet refunded."),
-                    view=self)
+                await state.lobby_msg.edit(embed=e, view=self)
             except Exception:
                 pass
 
 
 async def _process_dice_roll(state: DiceGameState, roller: discord.User,
-                              channel: discord.abc.Messageable):
+                              channel: discord.abc.Messageable,
+                              interaction: discord.Interaction = None):
     """Handle a /roll from one player. Sends roll result, resolves round if both rolled."""
     roll = random.randint(1, 6)
     state.round_rolls[roller.id] = roll
@@ -4489,14 +4543,18 @@ async def _process_dice_roll(state: DiceGameState, roller: discord.User,
     roll_embed = discord.Embed(
         color=C_GOLD,
         description=(
-            f"## 🎲  {roller.display_name} ROLLED!\n"
-            f"### {dice_emoji}  **{roll}**\n"
+            f"🎲 **{roller.display_name}** rolled {dice_emoji} **{roll}**"
         )
     )
     if roll_gif:
-        roll_embed.set_image(url=roll_gif)
+        roll_embed.set_thumbnail(url=roll_gif)
     _brand_embed(roll_embed)
-    await channel.send(content=roller.mention, embed=roll_embed)
+
+    # Use interaction response if provided (makes /roll send directly), else channel.send
+    if interaction is not None:
+        await interaction.followup.send(content=roller.mention, embed=roll_embed)
+    else:
+        await channel.send(content=roller.mention, embed=roll_embed)
 
     # If both players have rolled, resolve the round
     if not state.waiting_roll and state.opponent and state.creator.id in state.round_rolls and state.opponent.id in state.round_rolls:
@@ -4516,10 +4574,16 @@ async def _resolve_dice_round(state: DiceGameState, channel: discord.abc.Message
         tie_embed = discord.Embed(
             color=C_PUSH,
             description=(
-                f"## 🤝  TIE — ROUND DOESN'T COUNT\n"
-                f"{state.creator.display_name} {c_emoji} **{creator_roll}**  vs  "
-                f"{o_emoji} **{opponent_roll}** {state.opponent.display_name}\n\n"
-                f"Re-roll! Both do `/roll` again."
+                f"```\n"
+                f"  🤝  TIE — ROUND DOESN'T COUNT\n"
+                f"```\n"
+                f"╔══════════════════════════════╗\n"
+                f"║  🔴  {state.creator.display_name:<10}  {c_emoji} rolled **{creator_roll}**      ║\n"
+                f"║  🔵  {state.opponent.display_name:<10}  {o_emoji} rolled **{opponent_roll}**      ║\n"
+                f"╠══════════════════════════════╣\n"
+                f"║  Both rolled the same — re-roll!  ║\n"
+                f"║  Use `/roll` again to continue    ║\n"
+                f"╚══════════════════════════════╝"
             )
         )
         _brand_embed(tie_embed)
@@ -4568,16 +4632,22 @@ async def _resolve_dice_round(state: DiceGameState, channel: discord.abc.Message
         win_embed = discord.Embed(
             color=C_WIN,
             description=(
-                f"## 🏆  {winner.display_name} WINS!\n\n"
                 f"```\n"
-                f"  {state.creator.display_name:<20} {c_score}\n"
-                f"  {state.opponent.display_name:<20} {o_score}\n"
+                f"  🏆  DICE BATTLE — WINNER!\n"
                 f"```\n"
+                f"╔══════════════════════════════╗\n"
+                f"║  🥇  {winner.display_name:<25} ║\n"
+                f"╠══════════════════════════════╣\n"
+                f"║  📊  Final Score                  ║\n"
+                f"║  🔴  {state.creator.display_name:<20}  {c_score}   ║\n"
+                f"║  🔵  {state.opponent.display_name:<20}  {o_score}   ║\n"
+                f"╠══════════════════════════════╣\n"
+                f"║  💎  Bet      •  {format_amount(state.bet):<13} ║\n"
+                f"║  💰  Payout  •  {format_amount(payout):<13} ║\n"
+                f"╚══════════════════════════════╝\n"
                 f"{winner.mention} 🏆"
             )
         )
-        win_embed.add_field(name="Bet",              value=f"`{format_amount(state.bet)} 💎`",    inline=True)
-        win_embed.add_field(name="Pot after taxes",  value=f"`{format_amount(payout)} 💎`", inline=True)
         win_embed.set_thumbnail(url=winner_avatar)
         _brand_embed(win_embed)
         await channel.send(content=f"{winner.mention} {loser.mention}", embed=win_embed)
@@ -4602,11 +4672,18 @@ async def _resolve_dice_round(state: DiceGameState, channel: discord.abc.Message
         round_embed = discord.Embed(
             color=C_WIN,
             description=(
-                f"## {round_winner.display_name} wins the round!\n"
-                f"{state.creator.display_name} {c_emoji} **{creator_roll}**  vs  "
-                f"{o_emoji} **{opponent_roll}** {state.opponent.display_name}\n\n"
-                f"**Score:** {score_line}\n"
-                f"**Round {state.round_num}** — both do `/roll`!"
+                f"```\n"
+                f"  🎲  ROUND {state.round_num - 1} RESULT\n"
+                f"```\n"
+                f"╔══════════════════════════════╗\n"
+                f"║  🔴  {state.creator.display_name:<10}  {c_emoji} rolled **{creator_roll}**      ║\n"
+                f"║  🔵  {state.opponent.display_name:<10}  {o_emoji} rolled **{opponent_roll}**      ║\n"
+                f"╠══════════════════════════════╣\n"
+                f"║  🏅  {round_winner.display_name} wins the round!   ║\n"
+                f"║  📊  Score  •  {score_line:<16} ║\n"
+                f"╠══════════════════════════════╣\n"
+                f"║  ▶  Round {state.round_num} — use `/roll` to go!   ║\n"
+                f"╚══════════════════════════════╝"
             )
         )
         _brand_embed(round_embed)
@@ -4657,10 +4734,16 @@ async def cmd_dice(interaction: discord.Interaction, bet: str):
     mode_embed = discord.Embed(
         color=C_GOLD,
         description=(
-            f"## 🎲  DICE BATTLE — {format_amount(amt)} 💎\n\n"
-            f"**Pick a mode:**\n\n"
-            f"🔼 **Normal** — Highest roll wins each round.\n"
-            f"🔽 **Crazy** — Lowest roll wins each round.\n"
+            f"```\n"
+            f"  🎲  DICE BATTLE\n"
+            f"```\n"
+            f"╔══════════════════════════════╗\n"
+            f"║  💎  Bet  •  {format_amount(amt):<17} ║\n"
+            f"╠══════════════════════════════╣\n"
+            f"║  🔼  Normal  — Highest roll wins  ║\n"
+            f"║  🔽  Crazy   — Lowest roll wins   ║\n"
+            f"╚══════════════════════════════╝\n"
+            f"**Choose a mode to continue.**"
         )
     )
     _brand_embed(mode_embed)
@@ -4693,8 +4776,7 @@ async def cmd_roll(interaction: discord.Interaction):
         return
 
     await interaction.response.defer()
-    await _process_dice_roll(state, interaction.user, interaction.channel)
-    await interaction.followup.send("✅ Rolled!", ephemeral=True)
+    await _process_dice_roll(state, interaction.user, interaction.channel, interaction=interaction)
 
 
 @bot.tree.command(name="coinflip", description="Flip a coin — heads or tails!")
