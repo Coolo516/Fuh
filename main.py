@@ -146,7 +146,7 @@ DICE_EMOJIS = ["⚀", "⚁", "⚂", "⚃", "⚄", "⚅"]
 
 ROULETTE_OUTCOMES = [
     ("🔴", "Red",    0.47, 2.0),
-    ("⚫", "Black",  0.47, 2.0),
+    ("🔵", "Blue",   0.47, 2.0),
     ("🟡", "Yellow", 0.06, 6.0),
 ]
 
@@ -226,7 +226,6 @@ ALL_GAMES = {
     "🎟️ Scratch":            "scratch",
     "🎨 Color Dice":         "colordice",
     "📈 Progressive Coinflip": "progressivecoinflip",
-    "🎲 Progressive Dice":   "progressivedice",
     "⚔️ Case Battle":        "createcasebattle",
 }
 
@@ -310,6 +309,22 @@ LOGO_URL = os.getenv("LOGO_URL", "")  # Paste your Rbxflip logo URL here or set 
 COINFLIP_HEADS_GIF    = os.getenv("COINFLIP_HEADS_GIF",    "https://i.imgur.com/hgH4kFf.gif")
 COINFLIP_TAILS_GIF    = os.getenv("COINFLIP_TAILS_GIF",    "https://i.imgur.com/tUmaoHl.gif")
 COINFLIP_SPINNING_GIF = os.getenv("COINFLIP_SPINNING_GIF", "")  # Optional spinning GIF while flipping
+
+# Dice roll GIFs — one per face (1-6). Override via Railway env vars.
+DICE_GIF = [
+    os.getenv("DICE_GIF_1", "https://i.imgur.com/jFEUIt7.gif"),  # 1
+    os.getenv("DICE_GIF_2", "https://i.imgur.com/6uB4fO9.gif"),  # 2
+    os.getenv("DICE_GIF_3", "https://i.imgur.com/nKKWc84.gif"),  # 3
+    os.getenv("DICE_GIF_4", "https://i.imgur.com/fXAnN7Z.gif"),  # 4
+    os.getenv("DICE_GIF_5", "https://i.imgur.com/dRiVtmV.gif"),  # 5
+    os.getenv("DICE_GIF_6", "https://i.imgur.com/D9UC0hu.gif"),  # 6
+]
+
+def get_dice_gif(roll: int) -> str:
+    """Return the GIF URL for a given dice roll (1-6)."""
+    if 1 <= roll <= 6:
+        return DICE_GIF[roll - 1]
+    return ""
 
 
 
@@ -744,6 +759,32 @@ async def init_db():
                 PRIMARY KEY (user_id, achievement)
             )
         """)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS user_stats (
+                user_id         TEXT PRIMARY KEY,
+                cf_wins         INTEGER NOT NULL DEFAULT 0,
+                dice_wins       INTEGER NOT NULL DEFAULT 0,
+                bj_wins         INTEGER NOT NULL DEFAULT 0,
+                rlt_wins        INTEGER NOT NULL DEFAULT 0,
+                mines_clears    INTEGER NOT NULL DEFAULT 0,
+                mines_cashouts  INTEGER NOT NULL DEFAULT 0,
+                towers_clears   INTEGER NOT NULL DEFAULT 0,
+                hilo_cashouts   INTEGER NOT NULL DEFAULT 0,
+                rps_wins        INTEGER NOT NULL DEFAULT 0,
+                war_wins        INTEGER NOT NULL DEFAULT 0,
+                baccarat_wins   INTEGER NOT NULL DEFAULT 0,
+                scratch_wins    INTEGER NOT NULL DEFAULT 0,
+                horse_wins      INTEGER NOT NULL DEFAULT 0,
+                balloon_pops    INTEGER NOT NULL DEFAULT 0,
+                balloon_cashouts INTEGER NOT NULL DEFAULT 0,
+                upgrader_wins   INTEGER NOT NULL DEFAULT 0,
+                cdice_wins      INTEGER NOT NULL DEFAULT 0,
+                cb_wins         INTEGER NOT NULL DEFAULT 0,
+                rain_count      INTEGER NOT NULL DEFAULT 0,
+                biggest_win     BIGINT NOT NULL DEFAULT 0,
+                worst_streak    INTEGER NOT NULL DEFAULT 0
+            )
+        """)
     print("[DB] PostgreSQL ready ✓")
 
 async def ensure_user(conn, user: discord.User):
@@ -896,6 +937,47 @@ async def record_game(conn, user_id: int, won: bool, bet: int, payout: int, game
                ON CONFLICT (key) DO UPDATE SET value = (CAST(bot_settings.value AS BIGINT) + CAST($2 AS BIGINT))::TEXT""",
             f"rakeback_wagered_{user_id}", str(bet)
         )  # note: $2 stored as text but cast in query
+
+    # ── Per-game stats for achievements ──────────────────────────────
+    try:
+        _GAME_WIN_COL = {
+            "coinflip": "cf_wins", "progressive_coinflip": "cf_wins",
+            "dice": "dice_wins",   "progressive_dice": "dice_wins",
+            "blackjack": "bj_wins",
+            "roulette": "rlt_wins",
+            "rps": "rps_wins",
+            "war": "war_wins",
+            "baccarat": "baccarat_wins",
+            "horserace": "horse_wins",
+            "colordice": "cdice_wins",
+            "upgrader": "upgrader_wins",
+        }
+        col = _GAME_WIN_COL.get(game)
+        if won and col:
+            await conn.execute(
+                f"""INSERT INTO user_stats (user_id, {col}) VALUES ($1, 1)
+                    ON CONFLICT (user_id) DO UPDATE SET {col} = user_stats.{col} + 1""",
+                str(user_id)
+            )
+        # Track worst (loss) streak
+        if not won and new_streak < 0:
+            loss_streak = abs(new_streak)
+            await conn.execute(
+                """INSERT INTO user_stats (user_id, worst_streak) VALUES ($1, $2)
+                   ON CONFLICT (user_id) DO UPDATE
+                   SET worst_streak = GREATEST(user_stats.worst_streak, $2)""",
+                str(user_id), loss_streak
+            )
+        # Track biggest single win
+        if won and payout > 0:
+            await conn.execute(
+                """INSERT INTO user_stats (user_id, biggest_win) VALUES ($1, $2)
+                   ON CONFLICT (user_id) DO UPDATE
+                   SET biggest_win = GREATEST(user_stats.biggest_win, $2)""",
+                str(user_id), payout
+            )
+    except Exception as _se:
+        print(f"[STATS] user_stats update error: {_se}")
 
     # ── Quest progress (only counts if bet >= 3M) ──
     try:
@@ -1655,10 +1737,9 @@ async def _setup_guild_channels(guild: discord.Guild):
             # No fixed channels — private rooms created here via /createviproom
         ]),
         ("🎰 Gambling", staff_full(owner_role, manager_role), [
-            ("🏁｜flag-competition", "Flag competition channel.", gambling_ow(), False),
             ("🎲｜room-1",           "Gambling room 1.",          gambling_ow(), False),
             ("🎲｜room-2",           "Gambling room 2.",          gambling_ow(), False),
-            ("🤡｜hall-of-shame",    "Hall of shame.",            chat_ow(),     False),
+            ("🤡｜hall-of-flip",    "Hall of flip.",            chat_ow(),     False),
         ]),
         ("⚔️ SABPvp", staff_full(owner_role, manager_role), [
             ("🔷｜coinflip",    "PvP coinflip duels.",    gambling_ow(), False),
@@ -2558,6 +2639,59 @@ async def cmd_tip(interaction: discord.Interaction, user: discord.Member, amount
     log_e.set_footer(text=now_ts())
     await send_tip_log(log_e)
 
+# ── Achievement helpers (used by /stats and /achievements) ──────────────────
+
+async def _get_unlocked(conn, user_id: int) -> list[str]:
+    """Return list of achievement IDs the user has unlocked."""
+    rows = await conn.fetch(
+        "SELECT achievement FROM achievements WHERE user_id=$1",
+        str(user_id)
+    )
+    return [r["achievement"] for r in rows]
+
+async def _get_user_stats(conn, user_id: int) -> dict:
+    """Return per-game stats dict for achievement checks."""
+    row = await conn.fetchrow("SELECT * FROM user_stats WHERE user_id=$1", str(user_id))
+    if not row:
+        return {}
+    return dict(row)
+
+def _build_ach_display(unlocked: list[str]) -> str:
+    """Build a compact list of unlocked achievements."""
+    if not unlocked:
+        return "_No achievements yet — keep playing!_"
+    lines = []
+    for a in ACHIEVEMENTS:
+        if a["id"] in unlocked:
+            lines.append(f"{a['emoji']} **{a['name']}** — {a['desc']}")
+    if not lines:
+        return "_No achievements yet — keep playing!_"
+    display = lines[:10]
+    if len(unlocked) > 10:
+        display.append(f"_...and {len(unlocked) - 10} more_")
+    return "\n".join(display)
+
+async def check_and_grant_achievements(conn, user_id: int, row) -> None:
+    """Check all achievements and grant any newly earned ones."""
+    extra = await _get_user_stats(conn, user_id)
+    already = set(await _get_unlocked(conn, user_id))
+    for a in ACHIEVEMENTS:
+        if a["id"] in already:
+            continue
+        try:
+            earned = a["check"](row, extra)
+        except Exception:
+            earned = False
+        if earned:
+            try:
+                await conn.execute(
+                    """INSERT INTO achievements (user_id, achievement, unlocked_at)
+                       VALUES ($1, $2, $3) ON CONFLICT DO NOTHING""",
+                    str(user_id), a["id"], now_ts()
+                )
+            except Exception as e:
+                print(f"[ACHIEVEMENTS] grant error {a['id']}: {e}")
+
 @bot.tree.command(name="stats", description="View gambling statistics.")
 @app_commands.describe(user="User to check (leave empty for yourself)")
 async def cmd_stats(interaction: discord.Interaction, user: Optional[discord.Member] = None):
@@ -2605,8 +2739,12 @@ async def cmd_stats(interaction: discord.Interaction, user: Optional[discord.Mem
         _brand_embed(embed)
         await interaction.followup.send(embed=embed)
     except Exception as e:
+        import traceback; traceback.print_exc()
         print(f"[ERROR] stats: {type(e).__name__}: {e}")
-        await interaction.followup.send("⚠️  Something went wrong — try again.", ephemeral=True)
+        try:
+            await interaction.followup.send("⚠️  Something went wrong — try again.", ephemeral=True)
+        except Exception:
+            pass
 
 @bot.tree.command(name="history", description="View your last 10 transactions.")
 async def cmd_history(interaction: discord.Interaction):
@@ -2993,6 +3131,11 @@ Nobody joined — gems refunded to host.",
                     await ensure_user(conn, member)
                 await update_balance(conn, uid, share)
                 await log_transaction(conn, uid, "rain_recv", share, f"rain by {interaction.user.id}")
+                await conn.execute(
+                    """INSERT INTO user_stats (user_id, rain_count) VALUES ($1, 1)
+                       ON CONFLICT (user_id) DO UPDATE SET rain_count = user_stats.rain_count + 1""",
+                    str(uid)
+                )
                 await add_wager_req(conn, uid, share, "rain_recv")
         finally:
             await release_conn(conn)
@@ -3042,7 +3185,7 @@ async def cmd_games(interaction: discord.Interaction):
                 ("🎲  Dice",        "Roll higher than your opponent. Tie = full refund. Play vs bot or a friend."),
                 ("⚔️  War",         "Draw a card — highest card wins **2×**. Tie = both get refunded."),
                 ("✊  RPS",          "Rock · Paper · Scissors. Chain wins up to **1.96×**. Cash out any round."),
-                ("◉  Roulette",     "🔴 Black/Red → **2×**  ·  🟡 Yellow → **6×**  ·  Provably fair spins."),
+                ("◉  Roulette",     "🔴 Red/🔵 Blue → **2×**  ·  🟡 Yellow → **6×**  ·  Provably fair spins."),
             ]
         },
         "cards": {
@@ -3811,40 +3954,37 @@ class ProgressiveCoinflipView(BaseGameView):
         won = (result == guess)
 
         coin_gif     = COINFLIP_HEADS_GIF if result == "Heads" else COINFLIP_TAILS_GIF
-        coin_gif     = coin_gif if (coin_gif and coin_gif.startswith("http") and "PASTE_" not in coin_gif) else ""
+        coin_gif     = coin_gif if (coin_gif and coin_gif.startswith("http") and "PASTE_" not in coin_gif and any(coin_gif.lower().endswith(ext) for ext in (".gif", ".webp", ".png", ".jpg", ".jpeg"))) else ""
         coin_icon    = "🟡" if result == "Heads" else "⬛"
 
-        # ── Spinning animation with coin GIF ──
-        spin_frames = [
-            "🪙　　　　",
-            "　🪙　　　",
-            "　　🪙　　",
-            "　　　🪙　",
-            "　　　　🪙",
-            "　　　🪙　",
-            "　　🪙　　",
-            "　🪙　　　",
-            "🪙　　　　",
-            "　🪙　　　",
-        ]
-        for frame in spin_frames:
-            spin_embed = discord.Embed(
-                title="🪙  Coinflip",
-                description=(
-                    f"**Round {self.rounds + 1}** · Pot: **{format_amount(self.current_pot)}** 💎\n\n"
-                    f"{frame}"
-                ),
-                color=C_GOLD
+        # ── Spinning animation — mirrors regular coinflip exactly ──
+        spin_gif_url   = COINFLIP_SPINNING_GIF
+        spin_gif_valid = bool(
+            spin_gif_url and spin_gif_url.startswith("http") and "PASTE_" not in spin_gif_url
+            and any(spin_gif_url.lower().endswith(ext) for ext in (".gif", ".webp", ".png", ".jpg", ".jpeg"))
+        )
+        gif_valid = bool(coin_gif)
+        spin_embed = discord.Embed(
+            color=C_GOLD,
+            description=(
+                f"## 🪙  PROGRESSIVE COINFLIP — FLIPPING...\n"
+                f"┌─────────────────────────┐\n"
+                f"│ 💰 **Pot** • {format_amount(self.current_pot)} 💎\n"
+                f"│ 🔄 **Round** • {self.rounds + 1}\n"
+                f"│ ⏳ **Flipping the coin...**\n"
+                f"└─────────────────────────┘"
             )
-            if coin_gif:
-                spin_embed.set_image(url=coin_gif)
-            _brand_embed(spin_embed)
-            try:
-                await interaction.edit_original_response(embed=spin_embed)
-            except Exception as e:
-                print(f"[PCF ANIM] {e}")
-                break
-            await asyncio.sleep(0.35)
+        )
+        if spin_gif_valid:
+            spin_embed.set_image(url=spin_gif_url)
+        elif gif_valid:
+            spin_embed.set_image(url=coin_gif)
+        _brand_embed(spin_embed)
+        try:
+            await interaction.edit_original_response(embed=spin_embed)
+        except Exception as e:
+            print(f"[PCF ANIM] {e}")
+        await asyncio.sleep(2.5)
 
         if won:
             self.rounds      += 1
@@ -3859,7 +3999,7 @@ class ProgressiveCoinflipView(BaseGameView):
                     f"**Round {self.rounds}** complete — keep going or cash out!"
                 )
             )
-            if coin_gif:
+            if gif_valid:
                 win_embed.set_image(url=coin_gif)
             _brand_embed(win_embed)
             try:
@@ -3879,7 +4019,7 @@ class ProgressiveCoinflipView(BaseGameView):
                     f"You made it **{self.rounds}** round(s)."
                 )
             )
-            if coin_gif:
+            if gif_valid:
                 lose_embed.set_image(url=coin_gif)
             _brand_embed(lose_embed)
 
@@ -4068,259 +4208,430 @@ async def cmd_progressivecoinflip(interaction: discord.Interaction, bet: str):
 
 
 # ═══════════════════════════════════════════════════════════
-# GAME: PROGRESSIVE DICE
+# GAME: DICE  (revamped — multi-round PvP, Normal / Crazy mode)
 # ═══════════════════════════════════════════════════════════
 # Rules:
-#   - Roll each round — you need higher than dealer to win
-#   - Win = pot multiplies by 1.96x
-#   - Lose = lose everything
-#   - Tie = free reroll (no cost)
-#   - Cashout anytime after 1 win
+#   Normal — highest roll wins each round
+#   Crazy  — lowest roll wins each round
+#   Ties   — round doesn't count, roll again
+#   /roll  — both players use this command each round
+#   First to reach target wins (1, 2 or 3)
 
-class ProgressiveDiceView(BaseGameView):
-    def __init__(self, creator: discord.User, bet: int):
-        super().__init__(timeout=120)
-        self.creator         = creator
-        self.initial_bet     = bet
-        self.current_pot     = bet
-        self.rounds          = 0
-        self.done            = False
-        self._original_message = None
+# Active dice games: {creator_id: DiceGameState}
+_active_dice_games: dict[int, "DiceGameState"] = {}
 
-    def game_embed(self, result_line: str = "", player_roll: int = 0, dealer_roll: int = 0) -> discord.Embed:
-        multiplier = self.current_pot / self.initial_bet
-        color = C_GOLD if not result_line else (C_WIN if "✅" in result_line else (C_PUSH if "🔄" in result_line else C_LOSS))
-        embed = discord.Embed(title="🎲  PROGRESSIVE DICE", color=color)
-        embed.add_field(name="💰 Initial Bet",  value=format_amount(self.initial_bet),    inline=True)
-        embed.add_field(name="💎 Current Pot",  value=format_amount(self.current_pot),    inline=True)
-        embed.add_field(name="📈 Multiplier",   value=f"{multiplier:.2f}x",               inline=True)
-        embed.add_field(name="🔢 Rounds Won",   value=str(self.rounds),                   inline=True)
-        embed.add_field(name="⏭️ Next Win",     value=format_amount(int(self.current_pot * 1.96)), inline=True)
-        if player_roll and dealer_roll:
-            embed.add_field(
-                name="Last Roll",
-                value=f"You: {DICE_EMOJIS[player_roll-1]} **{player_roll}** vs Dealer: {DICE_EMOJIS[dealer_roll-1]} **{dealer_roll}**",
-                inline=False
+class DiceGameState:
+    def __init__(self, creator, bet, mode: str, target: int):
+        self.creator        = creator
+        self.opponent       = None
+        self.bet            = bet
+        self.mode           = mode      # "normal" or "crazy"
+        self.target         = target    # 1, 2, or 3
+        self.score          = {creator.id: 0}
+        self.lobby_msg      = None      # the public lobby message
+        self.channel        = None
+        self.waiting_roll   = set()     # who still needs to roll this round
+        self.round_rolls    = {}        # {user_id: roll_value}
+        self.round_num      = 0
+        self.done           = False
+
+    def pot(self) -> int:
+        return self.bet * 2
+
+    def score_line(self) -> str:
+        if not self.opponent:
+            return ""
+        c_score = self.score.get(self.creator.id, 0)
+        o_score = self.score.get(self.opponent.id, 0)
+        return (
+            f"**{self.creator.display_name}** {c_score} — "
+            f"{o_score} **{self.opponent.display_name}**"
+        )
+
+    def lobby_embed(self) -> discord.Embed:
+        mode_desc = "🔼 Highest roll wins" if self.mode == "normal" else "🔽 Lowest roll wins"
+        e = discord.Embed(
+            color=C_GOLD,
+            description=(
+                f"## 🎲  DICE BATTLE\n"
+                f"┌─────────────────────────────┐\n"
+                f"│ 👤 **Creator** • {self.creator.mention}\n"
+                f"│ 💰 **Bet** • {format_amount(self.bet)} 💎\n"
+                f"│ 🏆 **Pot** • {format_amount(self.pot())} 💎\n"
+                f"│ 🎮 **Mode** • {mode_desc}\n"
+                f"│ 🎯 **First to** • **{self.target}** wins\n"
+                f"└─────────────────────────────┘\n"
+                f"Anyone can click **Join** to enter!"
             )
-        if result_line:
-            embed.add_field(name="Outcome", value=result_line, inline=False)
-        embed.set_footer(text="Roll to double — Cash out anytime to secure your winnings!")
-        return embed
+        )
+        _brand_embed(e)
+        return e
 
-    @discord.ui.button(label="Roll", style=discord.ButtonStyle.primary, emoji="🎲", row=0)
-    async def roll_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+
+class DiceModeView(discord.ui.View):
+    """Step 1 — pick Normal or Crazy."""
+    def __init__(self, creator, bet, amt):
+        super().__init__(timeout=60)
+        self.creator = creator
+        self.bet     = bet
+        self.amt     = amt
+
+    async def _pick_mode(self, interaction: discord.Interaction, mode: str):
         if interaction.user.id != self.creator.id:
             await interaction.response.send_message("❌ Not your game.", ephemeral=True)
             return
-        if self.done:
-            await interaction.response.send_message("❌ Game already over.", ephemeral=True)
+        view = DiceTargetView(self.creator, self.bet, mode)
+        mode_label = "🔼 Normal (highest wins)" if mode == "normal" else "🔽 Crazy (lowest wins)"
+        e = discord.Embed(
+            color=C_GOLD,
+            description=(
+                f"## 🎲  DICE — MODE SELECTED\n"
+                f"**{mode_label}**\n\n"
+                f"How many rounds does someone need to win?\n"
+                f"Pick **1**, **2**, or **3**."
+            )
+        )
+        _brand_embed(e)
+        await interaction.response.edit_message(embed=e, view=view)
+
+    @discord.ui.button(label="Normal", style=discord.ButtonStyle.primary, emoji="🔼")
+    async def normal_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self._pick_mode(interaction, "normal")
+
+    @discord.ui.button(label="Crazy", style=discord.ButtonStyle.danger, emoji="🔽")
+    async def crazy_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self._pick_mode(interaction, "crazy")
+
+    @discord.ui.button(label="Cancel", style=discord.ButtonStyle.secondary, emoji="✖️")
+    async def cancel_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.creator.id:
+            await interaction.response.send_message("❌ Not your game.", ephemeral=True)
             return
-
-        await interaction.response.defer()
-
-        # Animation
-        for _ in range(3):
-            d1 = random.randint(1, 6)
-            d2 = random.randint(1, 6)
-            try:
-                await interaction.edit_original_response(
-                    embed=discord.Embed(
-                        title="🎲  PROGRESSIVE DICE",
-                        description=f"Rolling... {DICE_EMOJIS[d1-1]} vs {DICE_EMOJIS[d2-1]}",
-                        color=C_GOLD
-                    )
-                )
-            except Exception as e:
-
-                print(f"[ERROR] {type(e).__name__}: {e}")
-                pass
-            await asyncio.sleep(0.4)
-
-        player_roll = random.randint(1, 6)
-        dealer_roll = random.randint(1, 6)
-
-        # Handle tie — free reroll shown to user
-        if player_roll == dealer_roll:
-            result_line = f"🔄 **Tie!** {DICE_EMOJIS[player_roll-1]} {player_roll} vs {DICE_EMOJIS[dealer_roll-1]} {dealer_roll} — Free reroll!"
-            embed = self.game_embed(result_line, player_roll, dealer_roll)
-            await asyncio.sleep(0.3)
-            try:
-                await interaction.edit_original_response(embed=embed, view=self)
-            except Exception as e:
-
-                print(f"[ERROR] {type(e).__name__}: {e}")
-                pass
-            return
-
-        # Apply house edge on actual win/loss
-        bot_wins = random.random() < get_dynamic_house_win(self.creator.id, self.current_pot)
-        if bot_wins and player_roll >= dealer_roll:
-            # House forces dealer higher
-            dealer_roll = player_roll + random.randint(1, max(1, 6 - player_roll)) if player_roll < 6 else player_roll
-            dealer_roll = min(6, dealer_roll)
-        elif not bot_wins and dealer_roll >= player_roll:
-            # House forces player higher
-            player_roll = dealer_roll + random.randint(1, max(1, 6 - dealer_roll)) if dealer_roll < 6 else dealer_roll
-            player_roll = min(6, player_roll)
-
-        won = player_roll > dealer_roll
-
-        if won:
-            self.rounds      += 1
-            self.current_pot  = min(int(self.current_pot * 1.96), MAX_PAYOUT)
-            record_streak(self.creator.id, True, self.current_pot)
-            result_line = f"✅ **You win!** Pot → **{format_amount(self.current_pot)}** 💎"
-            embed = self.game_embed(result_line, player_roll, dealer_roll)
-            try:
-                await interaction.edit_original_response(embed=embed, view=self)
-            except Exception as e:
-                print(f"[PROG DICE WIN] {e}")
-        else:
-            self.done = True
-            self.stop()
-            record_streak(self.creator.id, False, self.current_pot)
-            result_line = f"❌ **Dealer wins!** You lose **{format_amount(self.current_pot)}** 💎"
-            embed = self.game_embed(result_line, player_roll, dealer_roll)
-
+        # Refund
+        async with get_user_lock(self.creator.id):
             conn = await get_conn()
             try:
-                await record_game(conn, self.creator.id, False, self.initial_bet, 0, "progressive_dice")
-                await log_transaction(conn, self.creator.id, "progressive_dice", -self.initial_bet)
+                await update_balance(conn, self.creator.id, self.bet)
             finally:
                 await release_conn(conn)
+        _end_game_session(self.creator.id)
+        await interaction.response.edit_message(
+            embed=discord.Embed(color=C_DARK, description="## 🎲  DICE — CANCELLED\n> Bet refunded."),
+            view=None)
 
-            try:
-                await interaction.edit_original_response(embed=embed, view=None)
-            except Exception as e:
-                print(f"[PROG DICE LOSE] {e}")
 
-            log_e = discord.Embed(title="🎲 Progressive Dice — Loss", color=C_LOSS)
-            log_e.add_field(name="Player",  value=self.creator.mention,             inline=True)
-            log_e.add_field(name="Bet",     value=format_amount(self.initial_bet),  inline=True)
-            log_e.add_field(name="Rounds",  value=str(self.rounds),                 inline=True)
-            log_e.set_footer(text=now_ts())
-            await send_log(log_e)
+class DiceTargetView(discord.ui.View):
+    """Step 2 — pick first to 1 / 2 / 3."""
+    def __init__(self, creator, bet, mode: str):
+        super().__init__(timeout=60)
+        self.creator = creator
+        self.bet     = bet
+        self.mode    = mode
 
-    @discord.ui.button(label="Cashout", style=discord.ButtonStyle.success, emoji="💰", row=0)
-    async def cashout_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def _pick_target(self, interaction: discord.Interaction, target: int):
         if interaction.user.id != self.creator.id:
             await interaction.response.send_message("❌ Not your game.", ephemeral=True)
             return
-        if self.rounds == 0:
-            await interaction.response.send_message("❌ Win at least 1 round before cashing out!", ephemeral=True)
+        state = DiceGameState(self.creator, self.bet, self.mode, target)
+        state.channel = interaction.channel
+        _active_dice_games[self.creator.id] = state
+        lobby_view = DiceLobbyView(state)
+        lobby_embed = state.lobby_embed()
+        await interaction.response.edit_message(embed=lobby_embed, view=lobby_view)
+        state.lobby_msg = await interaction.original_response()
+
+    @discord.ui.button(label="First to 1", style=discord.ButtonStyle.primary)
+    async def t1_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self._pick_target(interaction, 1)
+
+    @discord.ui.button(label="First to 2", style=discord.ButtonStyle.primary)
+    async def t2_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self._pick_target(interaction, 2)
+
+    @discord.ui.button(label="First to 3", style=discord.ButtonStyle.primary)
+    async def t3_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self._pick_target(interaction, 3)
+
+    @discord.ui.button(label="Cancel", style=discord.ButtonStyle.secondary, emoji="✖️")
+    async def cancel_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.creator.id:
+            await interaction.response.send_message("❌ Not your game.", ephemeral=True)
             return
-        if self.done:
-            await interaction.response.send_message("❌ Game already over.", ephemeral=True)
+        async with get_user_lock(self.creator.id):
+            conn = await get_conn()
+            try:
+                await update_balance(conn, self.creator.id, self.bet)
+            finally:
+                await release_conn(conn)
+        _end_game_session(self.creator.id)
+        await interaction.response.edit_message(
+            embed=discord.Embed(color=C_DARK, description="## 🎲  DICE — CANCELLED\n> Bet refunded."),
+            view=None)
+
+
+class DiceLobbyView(discord.ui.View):
+    """Step 3 — public lobby with Join / Cancel buttons."""
+    def __init__(self, state: DiceGameState):
+        super().__init__(timeout=180)
+        self.state    = state
+        self._lock    = asyncio.Lock()
+        self._joined  = False
+
+    @discord.ui.button(label="Join", style=discord.ButtonStyle.green, emoji="🎲")
+    async def join_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        state = self.state
+        if interaction.user.id == state.creator.id:
+            await interaction.response.send_message("❌ You can't join your own game.", ephemeral=True)
             return
+        async with self._lock:
+            if self._joined or state.opponent:
+                await interaction.response.send_message("❌ Game already has an opponent.", ephemeral=True)
+                return
+            # Deduct joiner's bet
+            async with get_user_lock(interaction.user.id):
+                conn = await get_conn()
+                try:
+                    await ensure_user(conn, interaction.user)
+                    deducted = await deduct_balance_safe(conn, interaction.user.id, state.bet)
+                    if not deducted:
+                        row = await get_user(conn, interaction.user.id)
+                        bal = row["balance"] if row else 0
+                        await interaction.response.send_message(
+                            f"❌ Need **{format_amount(state.bet)}** to join. You have **{format_amount(bal)}**.",
+                            ephemeral=True)
+                        return
+                finally:
+                    await release_conn(conn)
+            state.opponent = interaction.user
+            state.score[interaction.user.id] = 0
+            state.waiting_roll = {state.creator.id, state.opponent.id}
+            state.round_rolls  = {}
+            state.round_num    = 1
+            self._joined = True
 
-        await interaction.response.defer()
-        self.done = True
-        self.stop()
+        # Disable lobby buttons
+        for item in self.children:
+            item.disabled = True
 
-        payout = min(self.current_pot, MAX_PAYOUT)
-        profit = payout - self.initial_bet
-        record_streak(self.creator.id, True, payout)
+        mode_label = "🔼 Normal" if state.mode == "normal" else "🔽 Crazy"
+        e = discord.Embed(
+            color=C_BLUE,
+            description=(
+                f"## 🎲  DICE BATTLE — STARTED!\n"
+                f"┌─────────────────────────────┐\n"
+                f"│ 🔴 **{state.creator.display_name}** vs 🔵 **{state.opponent.display_name}**\n"
+                f"│ 💰 **Pot** • {format_amount(state.pot())} 💎\n"
+                f"│ 🎮 **Mode** • {mode_label}\n"
+                f"│ 🎯 **First to** • {state.target}\n"
+                f"└─────────────────────────────┘\n"
+                f"**Round 1** — both players do `/roll` to roll!"
+            )
+        )
+        _brand_embed(e)
+        await interaction.response.edit_message(embed=e, view=self)
 
+    @discord.ui.button(label="Cancel", style=discord.ButtonStyle.secondary, emoji="✖️")
+    async def cancel_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.state.creator.id:
+            await interaction.response.send_message("❌ Only the creator can cancel.", ephemeral=True)
+            return
+        async with self._lock:
+            if self._joined:
+                await interaction.response.send_message("❌ Game already started.", ephemeral=True)
+                return
+        # Refund creator
+        async with get_user_lock(self.state.creator.id):
+            conn = await get_conn()
+            try:
+                await update_balance(conn, self.state.creator.id, self.state.bet)
+            finally:
+                await release_conn(conn)
+        _active_dice_games.pop(self.state.creator.id, None)
+        _end_game_session(self.state.creator.id)
+        for item in self.children:
+            item.disabled = True
+        await interaction.response.edit_message(
+            embed=discord.Embed(color=C_DARK, description="## 🎲  DICE — CANCELLED\n> Bet refunded."),
+            view=self)
+
+    async def on_timeout(self):
+        state = self.state
+        if not self._joined:
+            async with get_user_lock(state.creator.id):
+                conn = await get_conn()
+                try:
+                    await update_balance(conn, state.creator.id, state.bet)
+                finally:
+                    await release_conn(conn)
+            _active_dice_games.pop(state.creator.id, None)
+            _end_game_session(state.creator.id)
+            for item in self.children:
+                item.disabled = True
+            try:
+                await state.lobby_msg.edit(
+                    embed=discord.Embed(color=C_DARK, description="## 🎲  DICE — EXPIRED\n> Timed out — bet refunded."),
+                    view=self)
+            except Exception:
+                pass
+
+
+async def _process_dice_roll(state: DiceGameState, roller: discord.User,
+                              channel: discord.abc.Messageable):
+    """Handle a /roll from one player. Sends roll result, resolves round if both rolled."""
+    roll = random.randint(1, 6)
+    state.round_rolls[roller.id] = roll
+    state.waiting_roll.discard(roller.id)
+
+    dice_emoji = DICE_EMOJIS[roll - 1] if roll - 1 < len(DICE_EMOJIS) else str(roll)
+    roll_gif   = get_dice_gif(roll)
+
+    # Build roll embed
+    roll_embed = discord.Embed(
+        color=C_GOLD,
+        description=(
+            f"## 🎲  {roller.display_name} ROLLED!\n"
+            f"### {dice_emoji}  **{roll}**\n"
+        )
+    )
+    if roll_gif:
+        roll_embed.set_image(url=roll_gif)
+    _brand_embed(roll_embed)
+    await channel.send(content=roller.mention, embed=roll_embed)
+
+    # If both players have rolled, resolve the round
+    if not state.waiting_roll and state.opponent and state.creator.id in state.round_rolls and state.opponent.id in state.round_rolls:
+        await _resolve_dice_round(state, channel)
+
+
+async def _resolve_dice_round(state: DiceGameState, channel: discord.abc.Messageable):
+    """Resolve one round after both players have rolled."""
+    creator_roll  = state.round_rolls[state.creator.id]
+    opponent_roll = state.round_rolls[state.opponent.id]
+    c_emoji = DICE_EMOJIS[creator_roll - 1] if creator_roll - 1 < len(DICE_EMOJIS) else str(creator_roll)
+    o_emoji = DICE_EMOJIS[opponent_roll - 1] if opponent_roll - 1 < len(DICE_EMOJIS) else str(opponent_roll)
+
+    # Determine round winner based on mode
+    if creator_roll == opponent_roll:
+        # Tie — round doesn't count
+        tie_embed = discord.Embed(
+            color=C_PUSH,
+            description=(
+                f"## 🤝  TIE — ROUND DOESN'T COUNT\n"
+                f"{state.creator.display_name} {c_emoji} **{creator_roll}**  vs  "
+                f"{o_emoji} **{opponent_roll}** {state.opponent.display_name}\n\n"
+                f"Re-roll! Both do `/roll` again."
+            )
+        )
+        _brand_embed(tie_embed)
+        await channel.send(embed=tie_embed)
+        # Reset for re-roll, same round number
+        state.waiting_roll = {state.creator.id, state.opponent.id}
+        state.round_rolls  = {}
+        return
+
+    if state.mode == "normal":
+        round_winner = state.creator if creator_roll > opponent_roll else state.opponent
+    else:  # crazy — lowest wins
+        round_winner = state.creator if creator_roll < opponent_roll else state.opponent
+    round_loser  = state.opponent if round_winner.id == state.creator.id else state.creator
+
+    state.score[round_winner.id] = state.score.get(round_winner.id, 0) + 1
+    c_score = state.score.get(state.creator.id, 0)
+    o_score = state.score.get(state.opponent.id, 0)
+    score_line = f"**{state.creator.display_name}** {c_score}  —  {o_score} **{state.opponent.display_name}**"
+
+    # Check if game is over
+    if state.score[round_winner.id] >= state.target:
+        state.done = True
+        # Settle finances
+        pot     = state.pot()
+        winner  = round_winner
+        loser   = round_loser
         conn = await get_conn()
         try:
-            payout = await apply_win_payout(conn, self.creator.id, payout, self.initial_bet, "progressive_dice")
-            await record_game(conn, self.creator.id, True, self.initial_bet, payout, "progressive_dice")
-            await log_transaction(conn, self.creator.id, "progressive_dice", profit)
-            if interaction.guild:
-                row = await get_user(conn, self.creator.id)
-                member = interaction.guild.get_member(self.creator.id)
-                if row and member:
-                    await update_user_rank(member, row["wagered"])
+            payout = await apply_win_payout(conn, winner.id, pot, state.bet, "dice")
+            profit = payout - state.bet
+            await record_game(conn, winner.id, True,  state.bet, payout, "dice")
+            await record_game(conn, loser.id,  False, state.bet, 0,      "dice")
+            await log_transaction(conn, winner.id, "dice_win",  profit)
+            await log_transaction(conn, loser.id,  "dice_loss", -state.bet)
+            for uid in [winner.id, loser.id]:
+                if channel.guild:
+                    member = channel.guild.get_member(uid)
+                    row    = await get_user(conn, uid)
+                    if member and row:
+                        await update_user_rank(member, row["wagered"])
         finally:
             await release_conn(conn)
 
-        embed = discord.Embed(
+        winner_avatar = await get_avatar(winner)
+        win_embed = discord.Embed(
             color=C_WIN,
             description=(
-                f"## 💰  CASHED OUT\n"
-                f"```diff\n"
-                f"+ {format_amount(profit):>27}\n"
-                f"  rounds  {self.rounds:>22}\n"
-                f"  mult    {payout/self.initial_bet:>21.2f}x\n"
-                f"```"
+                f"## 🏆  {winner.display_name} WINS!\n\n"
+                f"```\n"
+                f"  {state.creator.display_name:<20} {c_score}\n"
+                f"  {state.opponent.display_name:<20} {o_score}\n"
+                f"```\n"
+                f"{winner.mention} 🏆"
             )
         )
-        embed.add_field(name="Wager",   value=f"`{format_amount(self.initial_bet)} 💎`", inline=True)
-        embed.add_field(name="Payout",  value=f"`{format_amount(payout)} 💎`",           inline=True)
-        embed.set_thumbnail(url=await get_avatar(self.creator))
-        _brand_embed(embed)
+        win_embed.add_field(name="Bet",              value=f"`{format_amount(state.bet)} 💎`",    inline=True)
+        win_embed.add_field(name="Pot after taxes",  value=f"`{format_amount(payout)} 💎`", inline=True)
+        win_embed.set_thumbnail(url=winner_avatar)
+        _brand_embed(win_embed)
+        await channel.send(content=f"{winner.mention} {loser.mention}", embed=win_embed)
 
-        try:
-            await interaction.edit_original_response(embed=embed, view=None)
-        except Exception as e:
-            print(f"[PROG DICE CASHOUT] {e}")
-
-        log_e = discord.Embed(title="🎲 Progressive Dice — Cashout", color=C_WIN)
-        log_e.add_field(name="Player",  value=self.creator.mention,            inline=True)
-        log_e.add_field(name="Bet",     value=format_amount(self.initial_bet), inline=True)
-        log_e.add_field(name="Payout",  value=format_amount(payout),           inline=True)
-        log_e.add_field(name="Rounds",  value=str(self.rounds),                inline=True)
+        log_e = discord.Embed(title="🎲  DICE RESULT", color=C_WIN)
+        log_e.add_field(name="Winner",  value=winner.display_name,   inline=True)
+        log_e.add_field(name="Loser",   value=loser.display_name,    inline=True)
+        log_e.add_field(name="Payout",  value=format_amount(payout), inline=True)
+        log_e.add_field(name="Mode",    value=state.mode.title(),    inline=True)
         log_e.set_footer(text=now_ts())
         await send_log(log_e)
 
-    async def on_timeout(self):
-        for item in self.children:
-            item.disabled = True
-        if not self.done and self.rounds > 0:
-            payout = min(self.current_pot, MAX_PAYOUT)
-            conn = await get_conn()
-            try:
-                payout = await apply_win_payout(conn, self.creator.id, payout, self.initial_bet, "progressive_dice")
-            finally:
-                await release_conn(conn)
-            try:
-                await self._original_message.edit(
-                    embed=discord.Embed(
-                        title="Auto Cashed Out",
-                        description=f"**{format_amount(payout)}** 💎 returned to your balance.",
-                        color=C_PUSH),
-                    view=None)
-            except Exception as e:
+        _active_dice_games.pop(state.creator.id, None)
+        _end_game_session(state.creator.id)
+        _end_game_session(state.opponent.id)
 
-                print(f"[ERROR] {type(e).__name__}: {e}")
-                pass
-        elif not self.done:
-            conn = await get_conn()
-            try:
-                await update_balance(conn, self.creator.id, self.initial_bet)
-            finally:
-                await release_conn(conn)
-            try:
-                await self._original_message.edit(
-                    embed=discord.Embed(
-                        title="Timed Out",
-                        description=f"**{format_amount(self.initial_bet)}** 💎 refunded.",
-                        color=C_PUSH),
-                    view=None)
-            except Exception as e:
-
-                print(f"[ERROR] {type(e).__name__}: {e}")
-                pass
+    else:
+        # Round over, game continues
+        state.round_num   += 1
+        state.waiting_roll = {state.creator.id, state.opponent.id}
+        state.round_rolls  = {}
+        round_embed = discord.Embed(
+            color=C_WIN,
+            description=(
+                f"## {round_winner.display_name} wins the round!\n"
+                f"{state.creator.display_name} {c_emoji} **{creator_roll}**  vs  "
+                f"{o_emoji} **{opponent_roll}** {state.opponent.display_name}\n\n"
+                f"**Score:** {score_line}\n"
+                f"**Round {state.round_num}** — both do `/roll`!"
+            )
+        )
+        _brand_embed(round_embed)
+        await channel.send(embed=round_embed)
 
 
-@bot.tree.command(name="progressivedice", description="Beat the dealer each roll — chain wins or lock in your profit!")
-@app_commands.describe(bet="Bet amount e.g. 100k, 1M")
-async def cmd_progressivedice(interaction: discord.Interaction, bet: str):
-    wait = check_cooldown("progressivedice", interaction.user.id)
+@bot.tree.command(name="dice", description="Start a dice battle — Normal or Crazy mode, first to X wins!")
+@app_commands.describe(bet="Bet amount e.g. 5k, 1M")
+async def cmd_dice(interaction: discord.Interaction, bet: str):
+    wait = check_cooldown("dice", interaction.user.id)
     if wait > 0:
         await interaction.response.send_message(f"⏳ Wait **{wait:.1f}s** before playing again.", ephemeral=True)
         return
-    if is_game_locked("progressivedice", interaction.user):
+    if is_game_locked("dice", interaction.user):
         await interaction.response.send_message(
-            "🔒 **Progressivedice** is currently locked to staff only.", ephemeral=True
-        )
+            "🔒 **Dice** is currently locked to staff only.", ephemeral=True)
         return
     amt = parse_amount(bet)
     if not amt or amt < MIN_BET:
-        await interaction.response.send_message(f"❌ Minimum bet is **{format_amount(MIN_BET)}**.", ephemeral=True)
+        await interaction.response.send_message(
+            f"❌ Minimum bet is **{format_amount(MIN_BET)}**.", ephemeral=True)
         return
     if amt > MAX_BET:
-        await interaction.response.send_message(f"❌ Max bet is **{format_amount(MAX_BET)}**.", ephemeral=True)
+        await interaction.response.send_message(
+            f"❌ Max bet is **{format_amount(MAX_BET)}**.", ephemeral=True)
         return
 
     async with get_user_lock(interaction.user.id):
@@ -4332,22 +4643,58 @@ async def cmd_progressivedice(interaction: discord.Interaction, bet: str):
                 row = await get_user(conn, interaction.user.id)
                 bal = row["balance"] if row else 0
                 await interaction.response.send_message(
-                    f"❌ Insufficient balance — you have **{format_amount(bal)}** but need **{format_amount(amt)}**.", ephemeral=True)
+                    f"❌ Insufficient balance — you have **{format_amount(bal)}** but need **{format_amount(amt)}**.",
+                    ephemeral=True)
                 return
         finally:
             await release_conn(conn)
 
-    pf   = pf_new_game()
-    pf["game_name"] = "Progressive Dice"
     if not _start_game_session(interaction.user.id):
-        await interaction.response.send_message("⏳ You already have an active game running! Finish it before starting a new one.", ephemeral=True)
+        await interaction.response.send_message(
+            "⏳ You already have an active game running!", ephemeral=True)
         return
-    view = ProgressiveDiceView(interaction.user, amt)
-    view._pf_game_id = pf["game_id"]
-    embed = view.game_embed()
-    embed.add_field(name="🔐 Provably Fair", value=f"`{pf['commitment'][:32]}...` | ID: `{pf['game_id']}`", inline=False)
-    await interaction.response.send_message(embed=embed, view=view)
-    view._original_message = await interaction.original_response()
+
+    mode_embed = discord.Embed(
+        color=C_GOLD,
+        description=(
+            f"## 🎲  DICE BATTLE — {format_amount(amt)} 💎\n\n"
+            f"**Pick a mode:**\n\n"
+            f"🔼 **Normal** — Highest roll wins each round.\n"
+            f"🔽 **Crazy** — Lowest roll wins each round.\n"
+        )
+    )
+    _brand_embed(mode_embed)
+    view = DiceModeView(interaction.user, amt, amt)
+    await interaction.response.send_message(embed=mode_embed, view=view)
+
+
+@bot.tree.command(name="roll", description="Roll the dice in your active dice game.")
+async def cmd_roll(interaction: discord.Interaction):
+    # Find the game this user is part of
+    state = None
+    creator_id = None
+    for cid, s in list(_active_dice_games.items()):
+        if interaction.user.id == s.creator.id or (s.opponent and interaction.user.id == s.opponent.id):
+            state = s
+            creator_id = cid
+            break
+
+    if not state:
+        await interaction.response.send_message("❌ You're not in an active dice game.", ephemeral=True)
+        return
+    if state.done:
+        await interaction.response.send_message("❌ Game is already over.", ephemeral=True)
+        return
+    if not state.opponent:
+        await interaction.response.send_message("❌ Waiting for an opponent to join first.", ephemeral=True)
+        return
+    if interaction.user.id not in state.waiting_roll:
+        await interaction.response.send_message("❌ You've already rolled this round — wait for your opponent.", ephemeral=True)
+        return
+
+    await interaction.response.defer()
+    await _process_dice_roll(state, interaction.user, interaction.channel)
+    await interaction.followup.send("✅ Rolled!", ephemeral=True)
 
 
 @bot.tree.command(name="coinflip", description="Flip a coin — heads or tails!")
@@ -4414,299 +4761,6 @@ async def cmd_coinflip(interaction: discord.Interaction, bet: str, side: str):
     await interaction.response.send_message(embed=embed, view=view)
     view._original_message = await interaction.original_response()
 
-# ═══════════════════════════════════════════════════════════
-# GAME: DICE
-# ═══════════════════════════════════════════════════════════
-
-class DiceView(BaseGameView):
-    def __init__(self, creator, bet):
-        super().__init__(timeout=120)
-        self.creator            = creator
-        self.bet                = bet
-        self.opponent           = None
-        self.vs_bot             = False
-        self.started            = False
-        self._join_lock         = asyncio.Lock()
-        self._original_message  = None
-
-    @discord.ui.button(label="Join", style=discord.ButtonStyle.green, emoji="🎲")
-    async def join_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if interaction.user.id == self.creator.id:
-            await interaction.response.send_message("❌ Can't join your own game.", ephemeral=True)
-            return
-        async with self._join_lock:
-            if self.opponent or self.vs_bot:
-                await interaction.response.send_message("❌ Already has an opponent.", ephemeral=True)
-                return
-
-        await interaction.response.defer()
-
-        async with self._join_lock:
-            async with get_user_lock(interaction.user.id):
-                conn = await get_conn()
-                try:
-                    await ensure_user(conn, interaction.user)
-                    deducted = await deduct_balance_safe(conn, interaction.user.id, self.bet)
-                    if not deducted:
-                        row = await get_user(conn, interaction.user.id)
-                        bal = row["balance"] if row else 0
-                        await interaction.followup.send(
-                            f"❌ Need **{format_amount(self.bet)}** to join. You have **{format_amount(bal)}**.",
-                            ephemeral=True)
-                        return
-                    self.opponent = interaction.user
-                finally:
-                    await release_conn(conn)
-
-        await interaction.followup.send(f"✅ {interaction.user.mention} joined! Press **Start**.")
-
-    @discord.ui.button(label="vs Bot", style=discord.ButtonStyle.blurple, emoji="🤖")
-    async def bot_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if interaction.user.id != self.creator.id:
-            await interaction.response.send_message("❌ Only the creator.", ephemeral=True)
-            return
-        async with self._join_lock:
-            if self.opponent or self.vs_bot:
-                await interaction.response.send_message("❌ Already has an opponent.", ephemeral=True)
-                return
-            self.vs_bot = True
-        await interaction.response.defer()
-        try:
-            await interaction.edit_original_response(
-                embed=discord.Embed(
-                    title="🎲  DICE ROLL",
-                    description=f"{self.creator.mention} bets **{format_amount(self.bet)}**!\
-🤖 Bot called! Press **Start** to roll.",
-                    color=C_GOLD),
-                view=self)
-        except Exception as e:
-
-            print(f"[ERROR] {type(e).__name__}: {e}")
-            pass
-
-    @discord.ui.button(label="Start", style=discord.ButtonStyle.red, emoji="▶")
-    async def start_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if interaction.user.id != self.creator.id:
-            await interaction.response.send_message("❌ Only creator can start.", ephemeral=True)
-            return
-        if not self.opponent and not self.vs_bot:
-            await interaction.response.send_message("❌ Need opponent first.", ephemeral=True)
-            return
-        if self.started:
-            return
-
-        await interaction.response.defer()
-        self.started = True
-        await self._resolve(interaction)
-
-    async def on_timeout(self):
-        for item in self.children:
-            item.disabled = True
-        if not self.started:
-            try:
-                await self._original_message.edit(
-                    embed=discord.Embed(color=C_DARK, description="## 🎲  DICE ROLL — EXPIRED\n> Timed out — bet refunded"),
-                    view=None)
-            except Exception as e:
-
-                print(f"[ERROR] {type(e).__name__}: {e}")
-                pass
-            conn = await get_conn()
-            try:
-                await update_balance(conn, self.creator.id, self.bet)
-                if self.opponent:
-                    await update_balance(conn, self.opponent.id, self.bet)
-            finally:
-                await release_conn(conn)
-
-    async def _resolve(self, interaction: discord.Interaction):
-        if not interaction.response.is_done():
-            await interaction.response.defer()
-        msg = self._original_message
-        try:
-            await msg.edit(embed=discord.Embed(title="🎲 Rolling...", color=C_GOLD), view=None)
-        except Exception as e:
-
-            print(f"[ERROR] {type(e).__name__}: {e}")
-            pass
-
-        for _ in range(5):
-            d1, d2 = random.randint(0, 5), random.randint(0, 5)
-            try:
-                await msg.edit(embed=discord.Embed(title=f"🎲  {DICE_EMOJIS[d1]}  vs  {DICE_EMOJIS[d2]}", color=C_GOLD))
-            except Exception as e:
-
-                print(f"[ERROR] {type(e).__name__}: {e}")
-                pass
-            await asyncio.sleep(0.3)
-
-        # BUG FIX #4: Dice vs-bot tie loop — cap re-rolls to avoid infinite loop.
-        # After MAX_REROLLS attempts, if still tied, bot wins (house edge).
-        if self.vs_bot:
-            bot_wins = random.random() < get_dynamic_house_win(self.creator.id)
-            MAX_REROLLS = 20
-            attempts = 0
-            creator_roll  = random.randint(1, 6)
-            opponent_roll = random.randint(1, 6)
-            while attempts < MAX_REROLLS:
-                if bot_wins and opponent_roll > creator_roll:
-                    break
-                if not bot_wins and creator_roll > opponent_roll:
-                    break
-                if creator_roll == opponent_roll:
-                    # Tie: re-roll both
-                    creator_roll  = random.randint(1, 6)
-                    opponent_roll = random.randint(1, 6)
-                    attempts += 1
-                    continue
-                # Outcome is correct but wrong direction — re-roll one die to fix it
-                if bot_wins:
-                    # Need opponent > creator; bump opponent or lower creator
-                    opponent_roll = random.randint(creator_roll + 1, 6) if creator_roll < 6 else creator_roll - 1
-                else:
-                    creator_roll = random.randint(opponent_roll + 1, 6) if opponent_roll < 6 else opponent_roll - 1
-                attempts += 1
-            # If we exhausted re-rolls and it's still a tie, re-roll both until different
-            while creator_roll == opponent_roll:
-                creator_roll  = random.randint(1, 6)
-                opponent_roll = random.randint(1, 6)
-        else:
-            creator_roll  = random.randint(1, 6)
-            opponent_roll = random.randint(1, 6)
-
-        opponent_label = "🤖 Bot" if self.vs_bot else self.opponent.mention
-        embed = discord.Embed(title="🎲  DICE ROLL", color=C_GOLD)
-        embed.add_field(name=self.creator.display_name,
-                        value=f"{DICE_EMOJIS[creator_roll-1]} rolled **{creator_roll}**", inline=True)
-        embed.add_field(name="Opponent",
-                        value=f"{DICE_EMOJIS[opponent_roll-1]} rolled **{opponent_roll}**", inline=True)
-
-        try:
-            conn = await get_conn()
-            try:
-                if creator_roll > opponent_roll:
-                    embed.color = C_WIN
-                    if self.vs_bot:
-                        # vs Bot: house pays out — apply win tax
-                        payout_amt = await apply_win_payout(conn, self.creator.id, self.bet * 2, self.bet, "dice")
-                        embed.add_field(name="Result",
-                            value=f"**✦ {self.creator.mention} WINS  +{format_amount(payout_amt - self.bet)} 💎**", inline=False)
-                        await record_game(conn, self.creator.id, True, self.bet, payout_amt)
-                        await log_transaction(conn, self.creator.id, "dice_win", payout_amt - self.bet)
-                    else:
-                        embed.add_field(name="Result",
-                            value=f"**✦ {self.creator.mention} WINS  +{format_amount(self.bet)} 💎**", inline=False)
-                        await update_balance(conn, self.creator.id, self.bet * 2)
-                        await record_game(conn, self.creator.id, True, self.bet, self.bet * 2)
-                        await log_transaction(conn, self.creator.id, "dice_win", self.bet)
-                    if not self.vs_bot and self.opponent:
-                        await record_game(conn, self.opponent.id, False, self.bet, 0)
-                        await log_transaction(conn, self.opponent.id, "dice_loss", -self.bet)
-
-                elif opponent_roll > creator_roll:
-                    embed.color = C_LOSS
-                    embed.add_field(name="Result",
-                        value=f"💀 {opponent_label} wins!", inline=False)
-                    await record_game(conn, self.creator.id, False, self.bet, 0)
-                    await log_transaction(conn, self.creator.id, "dice_loss", -self.bet)
-                    if not self.vs_bot and self.opponent:
-                        await update_balance(conn, self.opponent.id, self.bet * 2)
-                        await record_game(conn, self.opponent.id, True, self.bet, self.bet * 2)
-                        await log_transaction(conn, self.opponent.id, "dice_win", self.bet)
-
-                else:
-                    embed.color = C_PUSH
-                    embed.add_field(name="Result", value="🤝 **Tie!** Bets returned.", inline=False)
-                    await update_balance(conn, self.creator.id, self.bet)
-                    await log_transaction(conn, self.creator.id, "dice_tie", 0)
-                    if not self.vs_bot and self.opponent:
-                        await update_balance(conn, self.opponent.id, self.bet)
-                        await log_transaction(conn, self.opponent.id, "dice_tie", 0)
-
-                # Update rank roles
-                for uid, member_obj in [
-                    (self.creator.id, interaction.guild.get_member(self.creator.id) if interaction.guild else None),
-                    (self.opponent.id if self.opponent and not self.vs_bot else None,
-                     interaction.guild.get_member(self.opponent.id) if self.opponent and not self.vs_bot and interaction.guild else None),
-                ]:
-                    if uid and member_obj:
-                        row = await get_user(conn, uid)
-                        if row:
-                            await update_user_rank(member_obj, row["wagered"])
-            finally:
-                await release_conn(conn)
-        except Exception as _db_err:
-            print(f"[DICE DB ERROR] {_db_err}")
-
-        await asyncio.sleep(0.3)
-        try:
-            await msg.edit(embed=embed, view=None)
-        except Exception as e:
-            print(f'[RESULT DISPLAY FAILED] {e}')
-
-        self.stop()
-        log_e = discord.Embed(title="⚄  DICE RESULT", color=C_GOLD)
-        log_e.add_field(name="Creator",  value=str(creator_roll),       inline=True)
-        log_e.add_field(name="Opponent", value=str(opponent_roll),      inline=True)
-        log_e.add_field(name="Bet",      value=format_amount(self.bet), inline=True)
-        log_e.set_footer(text=now_ts())
-        await send_log(log_e)
-
-@bot.tree.command(name="dice", description="Start a dice rolling game.")
-@app_commands.describe(bet="Bet amount e.g. 5k, 1M")
-async def cmd_dice(interaction: discord.Interaction, bet: str):
-    wait = check_cooldown("dice", interaction.user.id)
-    if wait > 0:
-        await interaction.response.send_message(f"⏳ Wait **{wait:.1f}s** before playing again.", ephemeral=True)
-        return
-    if is_game_locked("dice", interaction.user):
-        await interaction.response.send_message(
-            "🔒 **Dice** is currently locked to staff only.", ephemeral=True
-        )
-        return
-    amt = parse_amount(bet)
-    if not amt or amt < MIN_BET:
-        await interaction.response.send_message(
-            f"❌ Minimum bet is **{format_amount(MIN_BET)}**.", ephemeral=True)
-        return
-    if amt > MAX_BET:
-        await interaction.response.send_message(
-            f"❌ Max bet is **{format_amount(MAX_BET)}**.", ephemeral=True)
-        return
-
-    async with get_user_lock(interaction.user.id):
-        conn = await get_conn()
-        try:
-            await ensure_user(conn, interaction.user)
-            deducted = await deduct_balance_safe(conn, interaction.user.id, amt)
-            if not deducted:
-                row = await get_user(conn, interaction.user.id)
-                bal = row["balance"] if row else 0
-                await interaction.response.send_message(
-                    f"❌ Insufficient balance — you have **{format_amount(bal)}** but need **{format_amount(amt)}**.",
-                    ephemeral=True)
-                return
-        finally:
-            await release_conn(conn)
-
-    if not _start_game_session(interaction.user.id):
-        await interaction.response.send_message("⏳ You already have an active game running! Finish it before starting a new one.", ephemeral=True)
-        return
-    view  = DiceView(interaction.user, amt)
-    embed = discord.Embed(
-        color=C_GOLD,
-        description=(
-            f"## 🎲  DICE ROLL\n"
-            f"╔══════════════════════╗\n"
-            f"║  Wager  {format_amount(amt):>14}  ║\n"
-            f"╚══════════════════════╝\n"
-            f"Roll higher than your opponent to win **2×**.\n"
-            f"Tie = full refund."
-        )
-    )
-    embed.set_footer(text="Join  ·  vs Bot  ·  Start")
-    await interaction.response.send_message(embed=embed, view=view)
-    view._original_message = await interaction.original_response()
 
 # ═══════════════════════════════════════════════════════════
 # GAME: ROULETTE
@@ -4735,45 +4789,48 @@ class RouletteView(BaseGameView):
         spin_hash = hashlib.sha256(seed.encode()).hexdigest()
 
         # ── Spinning bar animation ──────────────────────────────
-        # Bar is exactly 10 slots wide. The pointer (⬇️) replaces
-        # one slot in the top row so it always stays within the bar.
-        BAR_LENGTH  = 10
-        SLOT_COLORS = ["🟥", "⬛", "🟨", "🟥", "⬛", "🟨", "🟥", "⬛", "🟨", "🟥"]
+        # Bar is 10 slots wide. A "pointer" slides across showing
+        # the color tiles. Slows down near the end like a real wheel.
+        BAR_LENGTH  = 5
+        SLOT_COLORS = ["🔴", "🔵", "🟡", "🔴", "🔵"]
         POINTER     = "⬆️"
-
-        def make_bar(pos: int) -> str:
-            top    = " ".join(SLOT_COLORS)
-            # Full-width space (　) as invisible placeholder so arrow aligns under correct slot
-            bottom = " ".join(POINTER if i == pos else "　" for i in range(BAR_LENGTH))
-            return f"{top}\n{bottom}"
 
         msg = self._original_message
         try:
             await msg.edit(embed=discord.Embed(title="◉  ROULETTE  —  SPINNING", description="```\n  ◉ ◉ ◉ ◉ ◉  spinning...\n```", color=C_GOLD), view=None)
         except Exception as e:
+
             print(f"[ERROR] {type(e).__name__}: {e}")
             pass
 
-        # Fast phase: 10 frames, 0.12s each — pointer sweeps all 10 slots once
-        for frame in range(10):
-            pos = frame % BAR_LENGTH
+        # Fast phase: 12 frames, 0.12s each
+        for frame in range(12):
+            pos    = frame % BAR_LENGTH
+            bar    = " ".join(SLOT_COLORS)
+            spacer = "   " * pos + POINTER
             e = discord.Embed(title="◉  SPINNING...", color=C_GOLD)
-            e.add_field(name="\​", value=make_bar(pos), inline=False)
+            e.add_field(name="\​", value=f"{bar}\
+{spacer}", inline=False)
             try:
                 await msg.edit(embed=e)
             except Exception as e:
+
                 print(f"[ERROR] {type(e).__name__}: {e}")
                 pass
             await asyncio.sleep(0.12)
 
-        # Slow-down phase: final slot lands, 3 frames with increasing delay
-        for i, delay in enumerate([0.35, 0.55, 0.75]):
-            pos = (10 + i) % BAR_LENGTH
+        # Slow-down phase: 6 frames, increasing delay
+        for i, delay in enumerate([0.2, 0.3, 0.4, 0.5, 0.6, 0.7]):
+            pos    = (12 + i) % BAR_LENGTH
+            bar    = " ".join(SLOT_COLORS)
+            spacer = "   " * pos + POINTER
             e = discord.Embed(title="◉  SLOWING...", color=C_GOLD)
-            e.add_field(name="\​", value=make_bar(pos), inline=False)
+            e.add_field(name="\​", value=f"{bar}\
+{spacer}", inline=False)
             try:
                 await msg.edit(embed=e)
             except Exception as e:
+
                 print(f"[ERROR] {type(e).__name__}: {e}")
                 pass
             await asyncio.sleep(delay)
@@ -4876,21 +4933,21 @@ class RouletteView(BaseGameView):
             return
         await self._spin(interaction, "🔴", "Red")
 
-    @discord.ui.button(label="⚫ Black (2x)", style=discord.ButtonStyle.secondary)
-    async def black_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+    @discord.ui.button(label="🔵 Blue (2x)", style=discord.ButtonStyle.primary)
+    async def blue_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
         if interaction.user.id != self.creator.id:
             await interaction.response.send_message("❌ Not your game.", ephemeral=True)
             return
-        await self._spin(interaction, "⚫", "Black")
+        await self._spin(interaction, "🔵", "Blue")
 
-    @discord.ui.button(label="🟡 Yellow (6x)", style=discord.ButtonStyle.primary)
+    @discord.ui.button(label="🟡 Yellow (6x)", style=discord.ButtonStyle.secondary)
     async def yellow_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
         if interaction.user.id != self.creator.id:
             await interaction.response.send_message("❌ Not your game.", ephemeral=True)
             return
         await self._spin(interaction, "🟡", "Yellow")
 
-@bot.tree.command(name="roulette", description="Play roulette — Red/Black (2x) or Yellow (6x).")
+@bot.tree.command(name="roulette", description="Play roulette — Red/Blue (2x) or Yellow (6x).")
 @app_commands.describe(bet="Bet amount e.g. 5k, 1M")
 async def cmd_roulette(interaction: discord.Interaction, bet: str):
     wait = check_cooldown("roulette", interaction.user.id)
@@ -6684,6 +6741,12 @@ class HiloView(BaseGameView):
             try:
                 payout = await apply_win_payout(conn, self.creator.id, payout, self.bet, "hilo")
                 await record_game(conn, self.creator.id, True, self.bet, payout, game="hilo")
+
+                await conn.execute(
+                    """INSERT INTO user_stats (user_id, hilo_cashouts) VALUES ($1, 1)
+                       ON CONFLICT (user_id) DO UPDATE SET hilo_cashouts = user_stats.hilo_cashouts + 1""",
+                    str(self.creator.id)
+                )
                 await log_transaction(conn, self.creator.id, "hilo_cashout", net)
                 if interaction.guild:
                     row = await get_user(conn, self.creator.id)
@@ -7044,6 +7107,16 @@ class TowersView(BaseGameView):
                         payout = await apply_win_payout(conn, self.creator.id, payout, self.bet, "towers")
                         await record_game(conn, self.creator.id, True, self.bet, payout)
                         await log_transaction(conn, self.creator.id, "towers_clear", net)
+                await conn.execute(
+                    """INSERT INTO user_stats (user_id, towers_clears) VALUES ($1, 1)
+                       ON CONFLICT (user_id) DO UPDATE SET towers_clears = user_stats.towers_clears + 1""",
+                    str(self.creator.id)
+                )
+                await conn.execute(
+                    """INSERT INTO user_stats (user_id, towers_cashouts) VALUES ($1, 1)
+                       ON CONFLICT (user_id) DO UPDATE SET towers_cashouts = user_stats.towers_cashouts + 1""",
+                    str(self.creator.id)
+                )
                         if interaction.guild:
                             row = await get_user(conn, self.creator.id)
                             member = interaction.guild.get_member(self.creator.id)
@@ -7100,6 +7173,11 @@ class TowersView(BaseGameView):
                 payout = await apply_win_payout(conn, self.creator.id, payout, self.bet, "towers")
                 await record_game(conn, self.creator.id, True, self.bet, payout)
                 await log_transaction(conn, self.creator.id, "towers_cashout", net)
+                await conn.execute(
+                    """INSERT INTO user_stats (user_id, towers_cashouts) VALUES ($1, 1)
+                       ON CONFLICT (user_id) DO UPDATE SET towers_cashouts = user_stats.towers_cashouts + 1""",
+                    str(self.creator.id)
+                )
                 if interaction.guild:
                     row = await get_user(conn, self.creator.id)
                     member = interaction.guild.get_member(self.creator.id)
@@ -7137,6 +7215,11 @@ class TowersView(BaseGameView):
                     payout = await apply_win_payout(conn, self.creator.id, payout, self.bet, "towers")
                     await record_game(conn, self.creator.id, True, self.bet, payout)
                     await log_transaction(conn, self.creator.id, "towers_timeout_cashout", payout - self.bet)
+                await conn.execute(
+                    """INSERT INTO user_stats (user_id, towers_cashouts) VALUES ($1, 1)
+                       ON CONFLICT (user_id) DO UPDATE SET towers_cashouts = user_stats.towers_cashouts + 1""",
+                    str(self.creator.id)
+                )
                     desc = f"Game timed out — auto cashed out **{format_amount(payout)} 💎** ({self.rows_cleared} rows cleared)."
                 else:
                     await update_balance(conn, self.creator.id, self.bet)
@@ -7907,6 +7990,16 @@ class MinesView(BaseGameView):
                         payout = await apply_win_payout(conn, self.creator.id, payout, self.bet, "mines")
                         await record_game(conn, self.creator.id, True, self.bet, payout, game="mines")
                         await log_transaction(conn, self.creator.id, "mines_clear", payout - self.bet)
+                await conn.execute(
+                    """INSERT INTO user_stats (user_id, mines_clears) VALUES ($1, 1)
+                       ON CONFLICT (user_id) DO UPDATE SET mines_clears = user_stats.mines_clears + 1""",
+                    str(self.creator.id)
+                )
+                await conn.execute(
+                    """INSERT INTO user_stats (user_id, mines_cashouts) VALUES ($1, 1)
+                       ON CONFLICT (user_id) DO UPDATE SET mines_cashouts = user_stats.mines_cashouts + 1""",
+                    str(self.creator.id)
+                )
                         if interaction.guild:
                             row = await get_user(conn, self.creator.id)
                             member = interaction.guild.get_member(self.creator.id)
@@ -7952,6 +8045,11 @@ class MinesView(BaseGameView):
                 payout = await apply_win_payout(conn, self.creator.id, payout, self.bet, "mines")
                 await record_game(conn, self.creator.id, True, self.bet, payout, game="mines")
                 await log_transaction(conn, self.creator.id, "mines_cashout", net)
+                await conn.execute(
+                    """INSERT INTO user_stats (user_id, mines_cashouts) VALUES ($1, 1)
+                       ON CONFLICT (user_id) DO UPDATE SET mines_cashouts = user_stats.mines_cashouts + 1""",
+                    str(self.creator.id)
+                )
                 if interaction.guild:
                     row = await get_user(conn, self.creator.id)
                     member = interaction.guild.get_member(self.creator.id)
@@ -7986,6 +8084,11 @@ class MinesView(BaseGameView):
                     payout = await apply_win_payout(conn, self.creator.id, payout, self.bet, "mines")
                     await record_game(conn, self.creator.id, True, self.bet, payout, game="mines")
                     await log_transaction(conn, self.creator.id, "mines_timeout_cashout", payout - self.bet)
+                await conn.execute(
+                    """INSERT INTO user_stats (user_id, mines_cashouts) VALUES ($1, 1)
+                       ON CONFLICT (user_id) DO UPDATE SET mines_cashouts = user_stats.mines_cashouts + 1""",
+                    str(self.creator.id)
+                )
                     desc = f"Game timed out — auto cashed out **{format_amount(payout)} 💎** ({self.gems_found} gems found)."
                 else:
                     await update_balance(conn, self.creator.id, self.bet)
@@ -8347,6 +8450,11 @@ class ScratchView(BaseGameView):
                     payout = await apply_win_payout(conn, self.creator.id, payout, self.bet, "upgrader")
                 await record_game(conn, self.creator.id, won, self.bet, payout)
                 await log_transaction(conn, self.creator.id, "scratch", net)
+                await conn.execute(
+                    """INSERT INTO user_stats (user_id, scratch_wins) VALUES ($1, 1)
+                       ON CONFLICT (user_id) DO UPDATE SET scratch_wins = user_stats.scratch_wins + 1""",
+                    str(self.creator.id)
+                )
                 if interaction.guild:
                     row = await get_user(conn, self.creator.id)
                     member = interaction.guild.get_member(self.creator.id)
@@ -8978,6 +9086,11 @@ class BalloonView(BaseGameView):
                 conn = await get_conn()
                 try:
                     await record_game(conn, self.creator.id, False, self.bet, 0, game="balloon")
+                await conn.execute(
+                    """INSERT INTO user_stats (user_id, balloon_pops) VALUES ($1, 1)
+                       ON CONFLICT (user_id) DO UPDATE SET balloon_pops = user_stats.balloon_pops + 1""",
+                    str(self.creator.id)
+                )
                     await log_transaction(conn, self.creator.id, "balloon_pop", -self.bet)
                     _rank_guild = interaction.guild or bot.get_guild(GUILD_ID)
                     if _rank_guild:
@@ -9037,6 +9150,12 @@ class BalloonView(BaseGameView):
             try:
                 payout = await apply_win_payout(conn, self.creator.id, payout, self.bet, "balloon")
                 await record_game(conn, self.creator.id, True, self.bet, payout, game="balloon")
+
+                await conn.execute(
+                    """INSERT INTO user_stats (user_id, balloon_cashouts) VALUES ($1, 1)
+                       ON CONFLICT (user_id) DO UPDATE SET balloon_cashouts = user_stats.balloon_cashouts + 1""",
+                    str(self.creator.id)
+                )
                 await log_transaction(conn, self.creator.id, "balloon_cashout", net)
                 if interaction.guild:
                     row = await get_user(conn, self.creator.id)
@@ -15167,6 +15286,11 @@ async def _run_cb(battle_id, message, case_key, num_cases,
             if p["id"] in winner_ids_set:
                 await apply_win_payout(conn, uid, share, entry_cost, "casebattle")
                 await record_game(conn, uid, True, entry_cost, share, "casebattle")
+                await conn.execute(
+                    """INSERT INTO user_stats (user_id, cb_wins) VALUES ($1, 1)
+                       ON CONFLICT (user_id) DO UPDATE SET cb_wins = user_stats.cb_wins + 1""",
+                    str(uid)
+                )
             else:
                 await record_game(conn, uid, False, entry_cost, 0, "casebattle")
 
@@ -15330,121 +15454,121 @@ ACHIEVEMENTS = [
     {"id":"first_blood",    "emoji":"🩸", "name":"First Blood",        "desc":"Win your first game",                        "cat":"gambling", "check": lambda r,x: r["wins"] >= 1},
     {"id":"ten_wins",       "emoji":"🎯", "name":"Getting Warmed Up",  "desc":"Win 10 games",                               "cat":"gambling", "check": lambda r,x: r["wins"] >= 10},
     {"id":"hundred_wins",   "emoji":"💯", "name":"Century Club",       "desc":"Win 100 games",                              "cat":"gambling", "check": lambda r,x: r["wins"] >= 100},
-    {"id":"thousand_wins",  "emoji":"🏅", "name":"Grinder",            "desc":"Win 500 games",                            "cat":"gambling", "check": lambda r,x: r["wins"] >= 500},
-    {"id":"tenk_wins",      "emoji":"🌠", "name":"Veteran",            "desc":"Win 3,000 games",                           "cat":"gambling", "check": lambda r,x: r["wins"] >= 3_000},
-    {"id":"100k_wins",      "emoji":"🔱", "name":"Immortal",           "desc":"Win 15,000 games",                          "cat":"gambling", "check": lambda r,x: r["wins"] >= 15_000},
+    {"id":"thousand_wins",  "emoji":"🏅", "name":"Grinder",            "desc":"Win 1,000 games",                            "cat":"gambling", "check": lambda r,x: r["wins"] >= 1_000},
+    {"id":"tenk_wins",      "emoji":"🌠", "name":"Veteran",            "desc":"Win 10,000 games",                           "cat":"gambling", "check": lambda r,x: r["wins"] >= 10_000},
+    {"id":"100k_wins",      "emoji":"🔱", "name":"Immortal",           "desc":"Win 100,000 games",                          "cat":"gambling", "check": lambda r,x: r["wins"] >= 100_000},
     {"id":"streak_5",       "emoji":"🔥", "name":"On Fire",            "desc":"Reach a 5-game win streak",                  "cat":"gambling", "check": lambda r,x: r["max_streak"] >= 5},
-    {"id":"streak_15",      "emoji":"⚡", "name":"Unstoppable",        "desc":"Reach an 8-game win streak",                 "cat":"gambling", "check": lambda r,x: r["max_streak"] >= 8},
-    {"id":"streak_30",      "emoji":"🌩️","name":"Lightning Rod",       "desc":"Reach a 20-game win streak",                 "cat":"gambling", "check": lambda r,x: r["max_streak"] >= 20},
-    {"id":"streak_50",      "emoji":"☄️", "name":"God Mode",           "desc":"Reach a 35-game win streak",                 "cat":"gambling", "check": lambda r,x: r["max_streak"] >= 35},
-    {"id":"streak_100",     "emoji":"👁️", "name":"Unkillable",         "desc":"Reach a 60-game win streak",                "cat":"gambling", "check": lambda r,x: r["max_streak"] >= 60},
+    {"id":"streak_15",      "emoji":"⚡", "name":"Unstoppable",        "desc":"Reach a 15-game win streak",                 "cat":"gambling", "check": lambda r,x: r["max_streak"] >= 15},
+    {"id":"streak_30",      "emoji":"🌩️","name":"Lightning Rod",       "desc":"Reach a 30-game win streak",                 "cat":"gambling", "check": lambda r,x: r["max_streak"] >= 30},
+    {"id":"streak_50",      "emoji":"☄️", "name":"God Mode",           "desc":"Reach a 50-game win streak",                 "cat":"gambling", "check": lambda r,x: r["max_streak"] >= 50},
+    {"id":"streak_100",     "emoji":"👁️", "name":"Unkillable",         "desc":"Reach a 100-game win streak",                "cat":"gambling", "check": lambda r,x: r["max_streak"] >= 100},
     {"id":"played_500",     "emoji":"🎲", "name":"Warming Up",         "desc":"Play 500 games total",                       "cat":"gambling", "check": lambda r,x: (r["wins"]+r["losses"]) >= 500},
-    {"id":"played_5000",    "emoji":"🎮", "name":"Addicted",           "desc":"Play 2,000 games total",                     "cat":"gambling", "check": lambda r,x: (r["wins"]+r["losses"]) >= 2_000},
-    {"id":"played_25000",   "emoji":"🕹️","name":"No Life",             "desc":"Play 10,000 games total",                    "cat":"gambling", "check": lambda r,x: (r["wins"]+r["losses"]) >= 10_000},
-    {"id":"played_100000",  "emoji":"💀", "name":"Needs Help",         "desc":"Play 40,000 games total",                   "cat":"gambling", "check": lambda r,x: (r["wins"]+r["losses"]) >= 40_000},
+    {"id":"played_5000",    "emoji":"🎮", "name":"Addicted",           "desc":"Play 5,000 games total",                     "cat":"gambling", "check": lambda r,x: (r["wins"]+r["losses"]) >= 5_000},
+    {"id":"played_25000",   "emoji":"🕹️","name":"No Life",             "desc":"Play 25,000 games total",                    "cat":"gambling", "check": lambda r,x: (r["wins"]+r["losses"]) >= 25_000},
+    {"id":"played_100000",  "emoji":"💀", "name":"Needs Help",         "desc":"Play 100,000 games total",                   "cat":"gambling", "check": lambda r,x: (r["wins"]+r["losses"]) >= 100_000},
     {"id":"comeback",       "emoji":"🔄", "name":"Comeback Kid",       "desc":"Win after losing 10 in a row",               "cat":"gambling", "check": lambda r,x: x.get("had_comeback", False)},
     # ── LOSS-BASED ──────────────────────────────────────
     {"id":"first_loss",     "emoji":"😬", "name":"Welcome to Sabpot",  "desc":"Lose your first game",                       "cat":"gambling", "check": lambda r,x: r["losses"] >= 1},
-    {"id":"lose_500",       "emoji":"📉", "name":"Rough Patch",        "desc":"Lose 250 games total",                       "cat":"gambling", "check": lambda r,x: r["losses"] >= 250},
-    {"id":"lose_5000",      "emoji":"💸", "name":"Chronic Loser",      "desc":"Lose 2,000 games total",                     "cat":"gambling", "check": lambda r,x: r["losses"] >= 2_000},
+    {"id":"lose_500",       "emoji":"📉", "name":"Rough Patch",        "desc":"Lose 500 games total",                       "cat":"gambling", "check": lambda r,x: r["losses"] >= 500},
+    {"id":"lose_5000",      "emoji":"💸", "name":"Chronic Loser",      "desc":"Lose 5,000 games total",                     "cat":"gambling", "check": lambda r,x: r["losses"] >= 5_000},
     {"id":"lose_streak_10", "emoji":"🥶", "name":"Ice Cold",           "desc":"Hit a 10-game loss streak",                  "cat":"gambling", "check": lambda r,x: x.get("worst_streak",0) >= 10},
-    {"id":"lose_streak_20", "emoji":"💔", "name":"Cursed",             "desc":"Hit a 15-game loss streak",                  "cat":"gambling", "check": lambda r,x: x.get("worst_streak",0) >= 15},
-    {"id":"lose_streak_50", "emoji":"☠️", "name":"Cooked",             "desc":"Hit a 30-game loss streak",                  "cat":"gambling", "check": lambda r,x: x.get("worst_streak",0) >= 30},
+    {"id":"lose_streak_20", "emoji":"💔", "name":"Cursed",             "desc":"Hit a 20-game loss streak",                  "cat":"gambling", "check": lambda r,x: x.get("worst_streak",0) >= 20},
+    {"id":"lose_streak_50", "emoji":"☠️", "name":"Cooked",             "desc":"Hit a 50-game loss streak",                  "cat":"gambling", "check": lambda r,x: x.get("worst_streak",0) >= 50},
     {"id":"broke",          "emoji":"🪙", "name":"Going Broke",        "desc":"Hit 0 balance",                              "cat":"gambling", "check": lambda r,x: x.get("hit_zero", False)},
     # ══════════════════════════════════════════════════════
     # GAME-SPECIFIC — Coinflip
     # ══════════════════════════════════════════════════════
     {"id":"cf_win_1",       "emoji":"🪙", "name":"Heads or Tails",     "desc":"Win a coinflip",                             "cat":"games",    "check": lambda r,x: x.get("cf_wins",0) >= 1},
-    {"id":"cf_win_250",     "emoji":"🌀", "name":"Flip Addict",        "desc":"Win 100 coinflips",                          "cat":"games",    "check": lambda r,x: x.get("cf_wins",0) >= 100},
-    {"id":"cf_win_2500",    "emoji":"🏧", "name":"Flip God",           "desc":"Win 750 coinflips",                        "cat":"games",    "check": lambda r,x: x.get("cf_wins",0) >= 750},
+    {"id":"cf_win_250",     "emoji":"🌀", "name":"Flip Addict",        "desc":"Win 250 coinflips",                          "cat":"games",    "check": lambda r,x: x.get("cf_wins",0) >= 250},
+    {"id":"cf_win_2500",    "emoji":"🏧", "name":"Flip God",           "desc":"Win 2,500 coinflips",                        "cat":"games",    "check": lambda r,x: x.get("cf_wins",0) >= 2_500},
     # ── Dice ────────────────────────────────────────────
     {"id":"dice_win_1",     "emoji":"🎲", "name":"Lucky Roll",         "desc":"Win a dice game",                            "cat":"games",    "check": lambda r,x: x.get("dice_wins",0) >= 1},
-    {"id":"dice_win_500",   "emoji":"🎯", "name":"Dice Demon",         "desc":"Win 200 dice games",                         "cat":"games",    "check": lambda r,x: x.get("dice_wins",0) >= 200},
-    {"id":"dice_win_5000",  "emoji":"🎳", "name":"Dice God",           "desc":"Win 1,500 dice games",                       "cat":"games",    "check": lambda r,x: x.get("dice_wins",0) >= 1_500},
+    {"id":"dice_win_500",   "emoji":"🎯", "name":"Dice Demon",         "desc":"Win 500 dice games",                         "cat":"games",    "check": lambda r,x: x.get("dice_wins",0) >= 500},
+    {"id":"dice_win_5000",  "emoji":"🎳", "name":"Dice God",           "desc":"Win 5,000 dice games",                       "cat":"games",    "check": lambda r,x: x.get("dice_wins",0) >= 5_000},
     # ── Blackjack ───────────────────────────────────────
     {"id":"bj_win_1",       "emoji":"♠️", "name":"21",                 "desc":"Win a blackjack hand",                       "cat":"games",    "check": lambda r,x: x.get("bj_wins",0) >= 1},
-    {"id":"bj_win_250",     "emoji":"🃏", "name":"Card Shark",         "desc":"Win 100 blackjack hands",                    "cat":"games",    "check": lambda r,x: x.get("bj_wins",0) >= 100},
-    {"id":"bj_win_2500",    "emoji":"🎴", "name":"House Beater",       "desc":"Win 750 blackjack hands",                  "cat":"games",    "check": lambda r,x: x.get("bj_wins",0) >= 750},
+    {"id":"bj_win_250",     "emoji":"🃏", "name":"Card Shark",         "desc":"Win 250 blackjack hands",                    "cat":"games",    "check": lambda r,x: x.get("bj_wins",0) >= 250},
+    {"id":"bj_win_2500",    "emoji":"🎴", "name":"House Beater",       "desc":"Win 2,500 blackjack hands",                  "cat":"games",    "check": lambda r,x: x.get("bj_wins",0) >= 2_500},
     # ── Roulette ────────────────────────────────────────
     {"id":"rlt_win_1",      "emoji":"◉",  "name":"Spin & Win",         "desc":"Win a roulette spin",                        "cat":"games",    "check": lambda r,x: x.get("rlt_wins",0) >= 1},
-    {"id":"rlt_win_250",    "emoji":"🎡", "name":"Wheel Wizard",       "desc":"Win 100 roulette spins",                     "cat":"games",    "check": lambda r,x: x.get("rlt_wins",0) >= 100},
-    {"id":"rlt_win_2500",   "emoji":"🌐", "name":"Roulette King",      "desc":"Win 750 roulette spins",                   "cat":"games",    "check": lambda r,x: x.get("rlt_wins",0) >= 750},
+    {"id":"rlt_win_250",    "emoji":"🎡", "name":"Wheel Wizard",       "desc":"Win 250 roulette spins",                     "cat":"games",    "check": lambda r,x: x.get("rlt_wins",0) >= 250},
+    {"id":"rlt_win_2500",   "emoji":"🌐", "name":"Roulette King",      "desc":"Win 2,500 roulette spins",                   "cat":"games",    "check": lambda r,x: x.get("rlt_wins",0) >= 2_500},
     # ── Mines ───────────────────────────────────────────
     {"id":"mines_clear_1",  "emoji":"💣", "name":"Defused",            "desc":"Clear a mines board",                        "cat":"games",    "check": lambda r,x: x.get("mines_clears",0) >= 1},
-    {"id":"mines_clear_100","emoji":"🔰", "name":"Bomb Squad",         "desc":"Clear 50 mines boards",                     "cat":"games",    "check": lambda r,x: x.get("mines_clears",0) >= 50},
-    {"id":"mines_clear_1000","emoji":"💥","name":"Minefield Walker",   "desc":"Clear 400 mines boards",                   "cat":"games",    "check": lambda r,x: x.get("mines_clears",0) >= 400},
-    {"id":"mines_cashout",  "emoji":"💰", "name":"Cash Out King",      "desc":"Cash out of mines 100 times",                "cat":"games",    "check": lambda r,x: x.get("mines_cashouts",0) >= 100},
+    {"id":"mines_clear_100","emoji":"🔰", "name":"Bomb Squad",         "desc":"Clear 100 mines boards",                     "cat":"games",    "check": lambda r,x: x.get("mines_clears",0) >= 100},
+    {"id":"mines_clear_1000","emoji":"💥","name":"Minefield Walker",   "desc":"Clear 1,000 mines boards",                   "cat":"games",    "check": lambda r,x: x.get("mines_clears",0) >= 1_000},
+    {"id":"mines_cashout",  "emoji":"💰", "name":"Cash Out King",      "desc":"Cash out of mines 250 times",                "cat":"games",    "check": lambda r,x: x.get("mines_cashouts",0) >= 250},
     # ── Towers ──────────────────────────────────────────
     {"id":"towers_clear_1", "emoji":"🗼", "name":"Tower Climber",      "desc":"Clear a towers board",                       "cat":"games",    "check": lambda r,x: x.get("towers_clears",0) >= 1},
-    {"id":"towers_clear_100","emoji":"🏔️","name":"Summit Reached",     "desc":"Clear 50 towers boards",                    "cat":"games",    "check": lambda r,x: x.get("towers_clears",0) >= 50},
-    {"id":"towers_clear_1000","emoji":"🌋","name":"Untouchable",        "desc":"Clear 400 towers boards",                  "cat":"games",    "check": lambda r,x: x.get("towers_clears",0) >= 400},
+    {"id":"towers_clear_100","emoji":"🏔️","name":"Summit Reached",     "desc":"Clear 100 towers boards",                    "cat":"games",    "check": lambda r,x: x.get("towers_clears",0) >= 100},
+    {"id":"towers_clear_1000","emoji":"🌋","name":"Untouchable",        "desc":"Clear 1,000 towers boards",                  "cat":"games",    "check": lambda r,x: x.get("towers_clears",0) >= 1_000},
     # ── HiLo ────────────────────────────────────────────
     {"id":"hilo_cashout_1", "emoji":"📈", "name":"Calculated",         "desc":"Cash out of HiLo with a profit",             "cat":"games",    "check": lambda r,x: x.get("hilo_cashouts",0) >= 1},
-    {"id":"hilo_cashout_250","emoji":"🔮", "name":"Oracle",            "desc":"Cash out of HiLo 100 times",                 "cat":"games",    "check": lambda r,x: x.get("hilo_cashouts",0) >= 100},
+    {"id":"hilo_cashout_250","emoji":"🔮", "name":"Oracle",            "desc":"Cash out of HiLo 250 times",                 "cat":"games",    "check": lambda r,x: x.get("hilo_cashouts",0) >= 250},
     # ── RPS ─────────────────────────────────────────────
     {"id":"rps_win_1",      "emoji":"✊", "name":"Challenger",         "desc":"Win an RPS game",                            "cat":"games",    "check": lambda r,x: x.get("rps_wins",0) >= 1},
-    {"id":"rps_win_500",    "emoji":"✌️", "name":"RPS Legend",         "desc":"Win 200 RPS games",                          "cat":"games",    "check": lambda r,x: x.get("rps_wins",0) >= 200},
+    {"id":"rps_win_500",    "emoji":"✌️", "name":"RPS Legend",         "desc":"Win 500 RPS games",                          "cat":"games",    "check": lambda r,x: x.get("rps_wins",0) >= 500},
     # ── War ─────────────────────────────────────────────
     {"id":"war_win_1",      "emoji":"⚔️","name":"Warrior",             "desc":"Win a war game",                             "cat":"games",    "check": lambda r,x: x.get("war_wins",0) >= 1},
-    {"id":"war_win_500",    "emoji":"🛡️","name":"General",             "desc":"Win 200 war games",                          "cat":"games",    "check": lambda r,x: x.get("war_wins",0) >= 200},
+    {"id":"war_win_500",    "emoji":"🛡️","name":"General",             "desc":"Win 500 war games",                          "cat":"games",    "check": lambda r,x: x.get("war_wins",0) >= 500},
     # ── Baccarat ────────────────────────────────────────
     {"id":"baccarat_win_1", "emoji":"🎩", "name":"High Society",       "desc":"Win a baccarat game",                        "cat":"games",    "check": lambda r,x: x.get("baccarat_wins",0) >= 1},
-    {"id":"baccarat_win_250","emoji":"🥂", "name":"James Bond",        "desc":"Win 100 baccarat games",                     "cat":"games",    "check": lambda r,x: x.get("baccarat_wins",0) >= 100},
+    {"id":"baccarat_win_250","emoji":"🥂", "name":"James Bond",        "desc":"Win 250 baccarat games",                     "cat":"games",    "check": lambda r,x: x.get("baccarat_wins",0) >= 250},
     # ── Scratch ─────────────────────────────────────────
     {"id":"scratch_win_1",  "emoji":"🎫", "name":"Lucky Ticket",       "desc":"Win a scratch card",                         "cat":"games",    "check": lambda r,x: x.get("scratch_wins",0) >= 1},
-    {"id":"scratch_win_100","emoji":"🎰", "name":"Scratcher",          "desc":"Win 50 scratch cards",                      "cat":"games",    "check": lambda r,x: x.get("scratch_wins",0) >= 50},
+    {"id":"scratch_win_100","emoji":"🎰", "name":"Scratcher",          "desc":"Win 100 scratch cards",                      "cat":"games",    "check": lambda r,x: x.get("scratch_wins",0) >= 100},
     # ── Horse Race ──────────────────────────────────────
     {"id":"horse_win_1",    "emoji":"🏇", "name":"Pick a Winner",      "desc":"Win a horse race bet",                       "cat":"games",    "check": lambda r,x: x.get("horse_wins",0) >= 1},
-    {"id":"horse_win_250",  "emoji":"🏆", "name":"Jockey",             "desc":"Win 100 horse race bets",                    "cat":"games",    "check": lambda r,x: x.get("horse_wins",0) >= 100},
+    {"id":"horse_win_250",  "emoji":"🏆", "name":"Jockey",             "desc":"Win 250 horse race bets",                    "cat":"games",    "check": lambda r,x: x.get("horse_wins",0) >= 250},
     # ── Balloon ─────────────────────────────────────────
     {"id":"balloon_pop_1",  "emoji":"🎈", "name":"Pop!",               "desc":"Pop a balloon",                              "cat":"games",    "check": lambda r,x: x.get("balloon_pops",0) >= 1},
-    {"id":"balloon_pop_250","emoji":"💥", "name":"Reckless",           "desc":"Pop 100 balloons",                           "cat":"games",    "check": lambda r,x: x.get("balloon_pops",0) >= 100},
-    {"id":"balloon_cashout","emoji":"🪂", "name":"Know When to Stop",  "desc":"Cash out of balloon 50 times",              "cat":"games",    "check": lambda r,x: x.get("balloon_cashouts",0) >= 50},
+    {"id":"balloon_pop_250","emoji":"💥", "name":"Reckless",           "desc":"Pop 250 balloons",                           "cat":"games",    "check": lambda r,x: x.get("balloon_pops",0) >= 250},
+    {"id":"balloon_cashout","emoji":"🪂", "name":"Know When to Stop",  "desc":"Cash out of balloon 100 times",              "cat":"games",    "check": lambda r,x: x.get("balloon_cashouts",0) >= 100},
     # ── Upgrader ────────────────────────────────────────
     {"id":"upgrader_win_1", "emoji":"⬆️","name":"Upgraded",            "desc":"Win an upgrader bet",                        "cat":"games",    "check": lambda r,x: x.get("upgrader_wins",0) >= 1},
-    {"id":"upgrader_win_100","emoji":"🚀","name":"To the Moon",        "desc":"Win 50 upgrader bets",                      "cat":"games",    "check": lambda r,x: x.get("upgrader_wins",0) >= 50},
+    {"id":"upgrader_win_100","emoji":"🚀","name":"To the Moon",        "desc":"Win 100 upgrader bets",                      "cat":"games",    "check": lambda r,x: x.get("upgrader_wins",0) >= 100},
     # ── Color Dice ──────────────────────────────────────
     {"id":"cdice_win_1",    "emoji":"🎨", "name":"Color Me Lucky",     "desc":"Win a color dice game",                      "cat":"games",    "check": lambda r,x: x.get("cdice_wins",0) >= 1},
-    {"id":"cdice_win_250",  "emoji":"🌈", "name":"Chromatic",          "desc":"Win 100 color dice games",                   "cat":"games",    "check": lambda r,x: x.get("cdice_wins",0) >= 100},
+    {"id":"cdice_win_250",  "emoji":"🌈", "name":"Chromatic",          "desc":"Win 250 color dice games",                   "cat":"games",    "check": lambda r,x: x.get("cdice_wins",0) >= 250},
     # ══════════════════════════════════════════════════════
     # ECONOMY — thresholds in internal units (100 = 1 gem)
     # ══════════════════════════════════════════════════════
     {"id":"wager_10m",      "emoji":"💸", "name":"Getting Started",    "desc":"Wager 10M gems total",                       "cat":"economy",  "check": lambda r,x: r["wagered"] >= 1_000_000_000},
-    {"id":"wager_50m",      "emoji":"💰", "name":"Warming Up",         "desc":"Wager 25M gems total",                       "cat":"economy",  "check": lambda r,x: r["wagered"] >= 2_500_000_000},
-    {"id":"wager_200m",     "emoji":"🏦", "name":"High Roller",        "desc":"Wager 100M gems total",                      "cat":"economy",  "check": lambda r,x: r["wagered"] >= 10_000_000_000},
-    {"id":"wager_600m",     "emoji":"🐋", "name":"Whale",              "desc":"Wager 300M gems total",                      "cat":"economy",  "check": lambda r,x: r["wagered"] >= 30_000_000_000},
-    {"id":"wager_1b5",      "emoji":"🌊", "name":"Deep Water",         "desc":"Wager 700M gems total",                      "cat":"economy",  "check": lambda r,x: r["wagered"] >= 70_000_000_000},
-    {"id":"wager_3b",       "emoji":"💎", "name":"Emerald",            "desc":"Wager 1.5B gems total",                        "cat":"economy",  "check": lambda r,x: r["wagered"] >= 150_000_000_000},
-    {"id":"wager_5b",       "emoji":"🎰", "name":"Degenerate",         "desc":"Wager 2.5B gems total",                        "cat":"economy",  "check": lambda r,x: r["wagered"] >= 250_000_000_000},
-    {"id":"wager_10b",      "emoji":"👑", "name":"Mega Whale",         "desc":"Wager 5B gems total",                       "cat":"economy",  "check": lambda r,x: r["wagered"] >= 500_000_000_000},
-    {"id":"wager_15b",      "emoji":"🏴‍☠️","name":"Legend",             "desc":"Wager 8B gems total",                       "cat":"economy",  "check": lambda r,x: r["wagered"] >= 800_000_000_000},
+    {"id":"wager_50m",      "emoji":"💰", "name":"Warming Up",         "desc":"Wager 50M gems total",                       "cat":"economy",  "check": lambda r,x: r["wagered"] >= 5_000_000_000},
+    {"id":"wager_200m",     "emoji":"🏦", "name":"High Roller",        "desc":"Wager 200M gems total",                      "cat":"economy",  "check": lambda r,x: r["wagered"] >= 20_000_000_000},
+    {"id":"wager_600m",     "emoji":"🐋", "name":"Whale",              "desc":"Wager 600M gems total",                      "cat":"economy",  "check": lambda r,x: r["wagered"] >= 60_000_000_000},
+    {"id":"wager_1b5",      "emoji":"🌊", "name":"Deep Water",         "desc":"Wager 1.5B gems total",                      "cat":"economy",  "check": lambda r,x: r["wagered"] >= 150_000_000_000},
+    {"id":"wager_3b",       "emoji":"💎", "name":"Emerald",            "desc":"Wager 3B gems total",                        "cat":"economy",  "check": lambda r,x: r["wagered"] >= 300_000_000_000},
+    {"id":"wager_5b",       "emoji":"🎰", "name":"Degenerate",         "desc":"Wager 5B gems total",                        "cat":"economy",  "check": lambda r,x: r["wagered"] >= 500_000_000_000},
+    {"id":"wager_10b",      "emoji":"👑", "name":"Mega Whale",         "desc":"Wager 10B gems total",                       "cat":"economy",  "check": lambda r,x: r["wagered"] >= 1_000_000_000_000},
+    {"id":"wager_15b",      "emoji":"🏴‍☠️","name":"Legend",             "desc":"Wager 15B gems total",                       "cat":"economy",  "check": lambda r,x: r["wagered"] >= 1_500_000_000_000},
     {"id":"balance_10m",    "emoji":"🔵", "name":"Stacking Up",        "desc":"Hold 10M gems at once",                      "cat":"economy",  "check": lambda r,x: r["balance"] >= 1_000_000_000},
-    {"id":"balance_70m",    "emoji":"🟣", "name":"VIP Material",       "desc":"Hold 30M gems at once",                      "cat":"economy",  "check": lambda r,x: r["balance"] >= 3_000_000_000},
-    {"id":"balance_500m",   "emoji":"💜", "name":"Rich",               "desc":"Hold 200M gems at once",                     "cat":"economy",  "check": lambda r,x: r["balance"] >= 20_000_000_000},
-    {"id":"balance_2b",     "emoji":"🌟", "name":"Filthy Rich",        "desc":"Hold 800M gems at once",                       "cat":"economy",  "check": lambda r,x: r["balance"] >= 80_000_000_000},
-    {"id":"balance_10b",    "emoji":"🏰", "name":"Empire",             "desc":"Hold 3B gems at once",                      "cat":"economy",  "check": lambda r,x: r["balance"] >= 300_000_000_000},
+    {"id":"balance_70m",    "emoji":"🟣", "name":"VIP Material",       "desc":"Hold 70M gems at once",                      "cat":"economy",  "check": lambda r,x: r["balance"] >= 7_000_000_000},
+    {"id":"balance_500m",   "emoji":"💜", "name":"Rich",               "desc":"Hold 500M gems at once",                     "cat":"economy",  "check": lambda r,x: r["balance"] >= 50_000_000_000},
+    {"id":"balance_2b",     "emoji":"🌟", "name":"Filthy Rich",        "desc":"Hold 2B gems at once",                       "cat":"economy",  "check": lambda r,x: r["balance"] >= 200_000_000_000},
+    {"id":"balance_10b",    "emoji":"🏰", "name":"Empire",             "desc":"Hold 10B gems at once",                      "cat":"economy",  "check": lambda r,x: r["balance"] >= 1_000_000_000_000},
     {"id":"daily_7",        "emoji":"📅", "name":"Weekly",             "desc":"Claim daily 7 times",                        "cat":"economy",  "check": lambda r,x: x.get("daily_count",0) >= 7},
     {"id":"daily_30",       "emoji":"🗓️","name":"Monthly",             "desc":"Claim daily 30 times",                       "cat":"economy",  "check": lambda r,x: x.get("daily_count",0) >= 30},
     {"id":"daily_365",      "emoji":"🎂", "name":"Loyal",              "desc":"Claim daily 365 times",                      "cat":"economy",  "check": lambda r,x: x.get("daily_count",0) >= 365},
     {"id":"promo_redeem",   "emoji":"🎟️","name":"Code Breaker",        "desc":"Redeem a promo code",                        "cat":"economy",  "check": lambda r,x: x.get("promo_count",0) >= 1},
     {"id":"promo_10",       "emoji":"🗝️","name":"Hunter",              "desc":"Redeem 10 promo codes",                      "cat":"economy",  "check": lambda r,x: x.get("promo_count",0) >= 10},
-    {"id":"big_single_win", "emoji":"💣", "name":"One Shot",           "desc":"Win 50M+ gems in a single game",            "cat":"economy",  "check": lambda r,x: x.get("biggest_win",0) >= 5_000_000_000},
-    {"id":"godroll",        "emoji":"🌌", "name":"God Roll",           "desc":"Win 200M+ gems in a single game",            "cat":"economy",  "check": lambda r,x: x.get("biggest_win",0) >= 20_000_000_000},
-    {"id":"sickroll",       "emoji":"🔴", "name":"Sick Roll",          "desc":"Win 500M+ gems in a single game",              "cat":"economy",  "check": lambda r,x: x.get("biggest_win",0) >= 50_000_000_000},
+    {"id":"big_single_win", "emoji":"💣", "name":"One Shot",           "desc":"Win 100M+ gems in a single game",            "cat":"economy",  "check": lambda r,x: x.get("biggest_win",0) >= 10_000_000_000},
+    {"id":"godroll",        "emoji":"🌌", "name":"God Roll",           "desc":"Win 500M+ gems in a single game",            "cat":"economy",  "check": lambda r,x: x.get("biggest_win",0) >= 50_000_000_000},
+    {"id":"sickroll",       "emoji":"🔴", "name":"Sick Roll",          "desc":"Win 1B+ gems in a single game",              "cat":"economy",  "check": lambda r,x: x.get("biggest_win",0) >= 100_000_000_000},
     # ══════════════════════════════════════════════════════
     # SOCIAL
     # ══════════════════════════════════════════════════════
     {"id":"tip_once",       "emoji":"🤝", "name":"Generous",           "desc":"Send a tip to someone",                      "cat":"social",   "check": lambda r,x: r["tips_sent"] >= 1},
-    {"id":"tip_50m",        "emoji":"💝", "name":"Philanthropist",     "desc":"Send 20M gems in tips total",                "cat":"social",   "check": lambda r,x: r["tips_sent"] >= 2_000_000_000},
-    {"id":"tip_500m",       "emoji":"🫂", "name":"Big Spender",        "desc":"Send 150M gems in tips total",               "cat":"social",   "check": lambda r,x: r["tips_sent"] >= 15_000_000_000},
+    {"id":"tip_50m",        "emoji":"💝", "name":"Philanthropist",     "desc":"Send 50M gems in tips total",                "cat":"social",   "check": lambda r,x: r["tips_sent"] >= 5_000_000_000},
+    {"id":"tip_500m",       "emoji":"🫂", "name":"Big Spender",        "desc":"Send 500M gems in tips total",               "cat":"social",   "check": lambda r,x: r["tips_sent"] >= 50_000_000_000},
     {"id":"tip_recv_1",     "emoji":"🎁", "name":"Blessed",            "desc":"Receive a tip",                              "cat":"social",   "check": lambda r,x: r["tips_recv"] >= 1},
-    {"id":"tip_recv_500m",  "emoji":"🤑", "name":"Popular",            "desc":"Receive 150M gems in tips total",            "cat":"social",   "check": lambda r,x: r["tips_recv"] >= 15_000_000_000},
+    {"id":"tip_recv_500m",  "emoji":"🤑", "name":"Popular",            "desc":"Receive 500M gems in tips total",            "cat":"social",   "check": lambda r,x: r["tips_recv"] >= 50_000_000_000},
     {"id":"rain_catch",     "emoji":"🌧️","name":"Rain Dancer",         "desc":"Catch a rain drop",                          "cat":"social",   "check": lambda r,x: x.get("rain_count",0) >= 1},
-    {"id":"rain_catch_25",  "emoji":"⛈️","name":"Storm Chaser",        "desc":"Catch 10 rain drops",                        "cat":"social",   "check": lambda r,x: x.get("rain_count",0) >= 10},
-    {"id":"rain_catch_100", "emoji":"🌊", "name":"Flood Survivor",     "desc":"Catch 40 rain drops",                       "cat":"social",   "check": lambda r,x: x.get("rain_count",0) >= 40},
+    {"id":"rain_catch_25",  "emoji":"⛈️","name":"Storm Chaser",        "desc":"Catch 25 rain drops",                        "cat":"social",   "check": lambda r,x: x.get("rain_count",0) >= 25},
+    {"id":"rain_catch_100", "emoji":"🌊", "name":"Flood Survivor",     "desc":"Catch 100 rain drops",                       "cat":"social",   "check": lambda r,x: x.get("rain_count",0) >= 100},
     {"id":"cb_win",         "emoji":"⚔️","name":"Battle Tested",       "desc":"Win a case battle",                          "cat":"social",   "check": lambda r,x: x.get("cb_wins",0) >= 1},
-    {"id":"cb_win_25",      "emoji":"🏆", "name":"Battle Hardened",    "desc":"Win 10 case battles",                        "cat":"social",   "check": lambda r,x: x.get("cb_wins",0) >= 10},
-    {"id":"cb_win_100",     "emoji":"👹", "name":"Battle God",         "desc":"Win 40 case battles",                       "cat":"social",   "check": lambda r,x: x.get("cb_wins",0) >= 40},
+    {"id":"cb_win_25",      "emoji":"🏆", "name":"Battle Hardened",    "desc":"Win 25 case battles",                        "cat":"social",   "check": lambda r,x: x.get("cb_wins",0) >= 25},
+    {"id":"cb_win_100",     "emoji":"👹", "name":"Battle God",         "desc":"Win 100 case battles",                       "cat":"social",   "check": lambda r,x: x.get("cb_wins",0) >= 100},
 ]
 
 # ═══════════════════════════════════════════════════════════
