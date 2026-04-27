@@ -61,18 +61,18 @@ except ImportError:
 # CONFIG
 # ═══════════════════════════════════════════════════════════
 
-TOKEN                = os.getenv("TOKEN", "")
-DATABASE_URL         = os.getenv("DATABASE_URL", "")
+TOKEN                = os.getenv("MTQ4MzI0NzI4ODY3NDU1MzkyNg.GMZmXZ.TJjd_MdElff7xJDa3AxnQ3mPl5g0BfFJKS3CUs", "")
+DATABASE_URL         = os.getenv("postgresql://neondb_owner:npg_8tkhrCMgQm9Z@ep-autumn-salad-anrw9n2w-pooler.c-6.us-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require", "")
 # Channel IDs — overwritten by /setup at runtime (stored in DB)
-LOG_CHANNEL_ID       = 0   # game-log
-FINANCE_LOG_ID       = 0   # finance-log
-INVITE_LOG_ID        = 0   # invite-log
-REWARD_LOG_ID        = 0   # rewards-log (rain, promo, daily, boost — set via /setrewardlog)
-TIP_LOG_ID             = 0   # tip-log (admin only)
-TIP_PUBLIC_LOG_ID      = 0   # tipping  (public in Extra)
-VOUCHES_CHANNEL_ID   = 0   # vouches (public activity feed)
-CASE_BATTLE_LOG_ID   = 0   # case-battles channel
-CASE_BATTLE_CHANNEL_ID = 0  # case-battles channel (same, set by auto-setup)
+LOG_CHANNEL_ID       = 1497813550180208690   # game-log
+FINANCE_LOG_ID       = 1497813550180208690   # finance-log
+INVITE_LOG_ID        = 1497813550180208690   # invite-log
+REWARD_LOG_ID        = 1497813550180208690   # rewards-log (rain, promo, daily, boost — set via /setrewardlog)
+TIP_LOG_ID             = 1497813550180208690   # tip-log (admin only)
+TIP_PUBLIC_LOG_ID      = 1497813550180208690   # tipping  (public in Extra)
+VOUCHES_CHANNEL_ID   = 1497813550180208690   # vouches (public activity feed)
+CASE_BATTLE_LOG_ID   = 1497813550180208690   # case-battles channel
+CASE_BATTLE_CHANNEL_ID = 1497813550180208690  # case-battles channel (same, set by auto-setup)
 
 async def _load_channel_ids():
     """Load channel IDs saved by /setup from the DB into globals."""
